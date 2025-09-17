@@ -200,11 +200,16 @@ class ChessDisplay:
         """Get the key of the checkbox at the given mouse position, if any"""
         mouse_x, mouse_y = mouse_pos
 
-        current_y = self.help_panel_y + 70  # Starting y position for checkboxes
+        current_y = self.help_panel_y + 20  # Starting y position for checkboxes (matches drawing)
         for option in self.help_options:
-            checkbox_rect = pygame.Rect(self.help_panel_x + 10, current_y,
-                                      self.checkbox_size, self.checkbox_size)
-            if checkbox_rect.collidepoint(mouse_x, mouse_y):
+            # Create expanded clickable area that includes both checkbox and text label
+            label_text = self.font_small.render(option["name"], True, Colors.LABEL_TEXT_COLOR)
+            label_width = label_text.get_width()
+
+            # Clickable area extends from checkbox to end of text label
+            clickable_rect = pygame.Rect(self.help_panel_x + 10, current_y,
+                                       self.checkbox_size + 12 + label_width, self.checkbox_size)
+            if clickable_rect.collidepoint(mouse_x, mouse_y):
                 return option["key"]
             current_y += self.checkbox_spacing
 
