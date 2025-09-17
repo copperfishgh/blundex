@@ -75,7 +75,7 @@ while is_running:
                     needs_redraw = True
                 else:
                     is_running = False
-            elif event.key == pygame.K_f:  # F key to toggle flip board
+            elif event.key == pygame.K_b:  # B key to toggle flip board
                 display.toggle_help_option("flip_board")
                 needs_redraw = True
             elif event.key == pygame.K_u:  # U key to undo

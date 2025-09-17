@@ -635,7 +635,7 @@ class ChessDisplay:
         """Draw a centered panel showing all keyboard shortcuts with dynamic sizing"""
         # Define shortcuts
         shortcuts = [
-            ("F", "Flip board"),
+            ("B", "Flip board"),
             ("U", "Undo move"),
             ("R", "Redo move"),
             ("H", "Toggle hanging pieces"),
