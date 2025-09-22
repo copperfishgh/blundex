@@ -649,6 +649,22 @@ class BoardState:
         black_activity = self.calculate_activity(Color.BLACK)
         return (white_activity, black_activity)
 
+    def count_pawns(self, color: Color) -> int:
+        """Count the number of pawns for a given color"""
+        pawn_count = 0
+        for row in range(8):
+            for col in range(8):
+                piece = self.get_piece(row, col)
+                if piece and piece.color == color and piece.type == PieceType.PAWN:
+                    pawn_count += 1
+        return pawn_count
+
+    def get_pawn_counts(self) -> Tuple[int, int]:
+        """Get pawn counts for both colors. Returns (white_pawns, black_pawns)"""
+        white_pawns = self.count_pawns(Color.WHITE)
+        black_pawns = self.count_pawns(Color.BLACK)
+        return (white_pawns, black_pawns)
+
     def copy(self) -> 'BoardState':
         """Create a deep copy of the board state"""
         return copy.deepcopy(self)

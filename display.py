@@ -45,11 +45,13 @@ class ChessDisplay:
             # Try to use a modern system font (Arial, Segoe UI, or similar)
             self.font_large = pygame.font.SysFont('segoeui,arial,helvetica,sans-serif', int(self.board_size * GameConfig.FONT_LARGE_PERCENTAGE), bold=True)
             self.font_medium = pygame.font.SysFont('segoeui,arial,helvetica,sans-serif', int(self.board_size * GameConfig.FONT_MEDIUM_PERCENTAGE), bold=False)
+            self.font_medium_bold = pygame.font.SysFont('segoeui,arial,helvetica,sans-serif', int(self.board_size * GameConfig.FONT_MEDIUM_PERCENTAGE), bold=True)
             self.font_small = pygame.font.SysFont('segoeui,arial,helvetica,sans-serif', int(self.board_size * GameConfig.FONT_SMALL_PERCENTAGE), bold=False)
         except:
             # Fallback to default if system fonts aren't available
             self.font_large = pygame.font.Font(None, int(self.board_size * GameConfig.FONT_LARGE_PERCENTAGE))
             self.font_medium = pygame.font.Font(None, int(self.board_size * GameConfig.FONT_MEDIUM_PERCENTAGE))
+            self.font_medium_bold = pygame.font.Font(None, int(self.board_size * GameConfig.FONT_MEDIUM_PERCENTAGE))
             self.font_small = pygame.font.Font(None, int(self.board_size * GameConfig.FONT_SMALL_PERCENTAGE))
         
         # Load piece images (placeholder - you'd load actual piece images here)
@@ -504,22 +506,25 @@ class ChessDisplay:
         # Create activity text: "Activity: XX YY"
         activity_text = f"Activity: {player_activity} {opponent_activity}"
 
-        # Determine colors (green for winning score)
+        # Determine colors (bold black for winning score, medium grey for losing)
         if player_activity > opponent_activity:
-            player_color = Colors.ANNOTATION_POSITIVE  # Green
-            opponent_color = Colors.RGB_BLACK
+            player_color = Colors.RGB_BLACK  # Bold black
+            opponent_color = Colors.ANNOTATION_NEUTRAL  # Medium grey
         elif opponent_activity > player_activity:
-            player_color = Colors.RGB_BLACK
-            opponent_color = Colors.ANNOTATION_POSITIVE  # Green
+            player_color = Colors.ANNOTATION_NEUTRAL  # Medium grey
+            opponent_color = Colors.RGB_BLACK  # Bold black
         else:
             player_color = Colors.RGB_BLACK
             opponent_color = Colors.RGB_BLACK
 
         # Render text parts separately for color highlighting
         label_surface = self.font_medium.render("Activity: ", True, Colors.RGB_BLACK)
-        player_surface = self.font_medium.render(str(player_activity), True, player_color)
+        # Use bold font for black (winning) scores, regular for grey (losing) scores
+        player_font = self.font_medium_bold if player_color == Colors.RGB_BLACK else self.font_medium
+        opponent_font = self.font_medium_bold if opponent_color == Colors.RGB_BLACK else self.font_medium
+        player_surface = player_font.render(str(player_activity), True, player_color)
         space_surface = self.font_medium.render(" ", True, Colors.RGB_BLACK)
-        opponent_surface = self.font_medium.render(str(opponent_activity), True, opponent_color)
+        opponent_surface = opponent_font.render(str(opponent_activity), True, opponent_color)
 
         # Calculate total width for centering
         total_width = (label_surface.get_width() + player_surface.get_width() +
@@ -535,6 +540,60 @@ class ChessDisplay:
         screen.blit(space_surface, (current_x, activity_y))
         current_x += space_surface.get_width()
         screen.blit(opponent_surface, (current_x, activity_y))
+
+    def draw_pawn_display(self, screen, board_state: BoardState, is_board_flipped: bool = False) -> None:
+        """Draw pawn counts underneath the activity display in tabular format"""
+        white_pawns, black_pawns = board_state.get_pawn_counts()
+
+        # Determine player vs opponent based on board orientation
+        if is_board_flipped:
+            player_pawns = black_pawns
+            opponent_pawns = white_pawns
+        else:
+            player_pawns = white_pawns
+            opponent_pawns = black_pawns
+
+        # Position below activity display
+        center_x = self.board_margin_x + self.board_size // 2
+        pawn_y = self.board_margin_y + self.board_size + 60  # Below activity line
+
+        # Create pawn text: "Pawns: XX YY"
+        pawn_text = f"Pawns: {player_pawns} {opponent_pawns}"
+
+        # Determine colors (bold black for more pawns, medium grey for fewer)
+        if player_pawns > opponent_pawns:
+            player_color = Colors.RGB_BLACK  # Bold black
+            opponent_color = Colors.ANNOTATION_NEUTRAL  # Medium grey
+        elif opponent_pawns > player_pawns:
+            player_color = Colors.ANNOTATION_NEUTRAL  # Medium grey
+            opponent_color = Colors.RGB_BLACK  # Bold black
+        else:
+            player_color = Colors.RGB_BLACK
+            opponent_color = Colors.RGB_BLACK
+
+        # Render text parts separately for color highlighting
+        label_surface = self.font_medium.render("Pawns: ", True, Colors.RGB_BLACK)
+        # Use bold font for black (winning) scores, regular for grey (losing) scores
+        player_font = self.font_medium_bold if player_color == Colors.RGB_BLACK else self.font_medium
+        opponent_font = self.font_medium_bold if opponent_color == Colors.RGB_BLACK else self.font_medium
+        player_surface = player_font.render(str(player_pawns), True, player_color)
+        space_surface = self.font_medium.render(" ", True, Colors.RGB_BLACK)
+        opponent_surface = opponent_font.render(str(opponent_pawns), True, opponent_color)
+
+        # Calculate total width for centering
+        total_width = (label_surface.get_width() + player_surface.get_width() +
+                      space_surface.get_width() + opponent_surface.get_width())
+        start_x = center_x - total_width // 2
+
+        # Draw each part
+        current_x = start_x
+        screen.blit(label_surface, (current_x, pawn_y))
+        current_x += label_surface.get_width()
+        screen.blit(player_surface, (current_x, pawn_y))
+        current_x += player_surface.get_width()
+        screen.blit(space_surface, (current_x, pawn_y))
+        current_x += space_surface.get_width()
+        screen.blit(opponent_surface, (current_x, pawn_y))
 
     def draw_text(self, screen, text: str, x: int, y: int, font: pygame.font.Font,
                   color: Tuple[int, int, int] = None) -> None:
@@ -649,9 +708,11 @@ class ChessDisplay:
         if preview_board_state:
             # Only recalculate when there's a preview (dragging to legal square)
             self.draw_activity_display(screen, preview_board_state, is_board_flipped, force_recalculate=True)
+            self.draw_pawn_display(screen, preview_board_state, is_board_flipped)
         else:
             # Show cached activity scores without recalculating
             self.draw_activity_display(screen, board_state, is_board_flipped, force_recalculate=False)
+            self.draw_pawn_display(screen, board_state, is_board_flipped)
 
         self.draw_help_panel(screen)
 
