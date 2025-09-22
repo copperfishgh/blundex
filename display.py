@@ -79,6 +79,15 @@ class ChessDisplay:
         # Checkmate animation variables
         self.checkmate_animation_start_time = None
         self.checkmate_king_position = None
+
+        # Cache activity scores to avoid constant recalculation
+        self.cached_activity_white = 0
+        self.cached_activity_black = 0
+        self.activity_cache_valid = False
+
+    def invalidate_activity_cache(self):
+        """Invalidate activity cache when board state changes"""
+        self.activity_cache_valid = False
     
     def _load_piece_images(self) -> dict:
         """Load and scale piece images from PNG files"""
@@ -465,8 +474,69 @@ class ChessDisplay:
             text_surface = self.font_small.render(number, True, self.RGB_BLACK)
             text_rect = text_surface.get_rect(center=(x, y))
             screen.blit(text_surface, text_rect)
-    
-    def draw_text(self, screen, text: str, x: int, y: int, font: pygame.font.Font, 
+
+    def draw_activity_display(self, screen, board_state: BoardState, is_board_flipped: bool = False, force_recalculate: bool = False) -> None:
+        """Draw activity scores underneath the board"""
+        if force_recalculate or not self.activity_cache_valid:
+            # Only recalculate when forced (preview) or cache invalid
+            white_activity, black_activity = board_state.get_activity_scores()
+            if not force_recalculate:
+                # Update cache only if this is the main board state
+                self.cached_activity_white = white_activity
+                self.cached_activity_black = black_activity
+                self.activity_cache_valid = True
+        else:
+            # Use cached values
+            white_activity, black_activity = self.cached_activity_white, self.cached_activity_black
+
+        # Determine player vs opponent based on board orientation
+        if is_board_flipped:
+            player_activity = black_activity
+            opponent_activity = white_activity
+        else:
+            player_activity = white_activity
+            opponent_activity = black_activity
+
+        # Position below coordinates
+        center_x = self.board_margin_x + self.board_size // 2
+        activity_y = self.board_margin_y + self.board_size + 35
+
+        # Create activity text: "Activity: XX YY"
+        activity_text = f"Activity: {player_activity} {opponent_activity}"
+
+        # Determine colors (green for winning score)
+        if player_activity > opponent_activity:
+            player_color = Colors.ANNOTATION_POSITIVE  # Green
+            opponent_color = Colors.RGB_BLACK
+        elif opponent_activity > player_activity:
+            player_color = Colors.RGB_BLACK
+            opponent_color = Colors.ANNOTATION_POSITIVE  # Green
+        else:
+            player_color = Colors.RGB_BLACK
+            opponent_color = Colors.RGB_BLACK
+
+        # Render text parts separately for color highlighting
+        label_surface = self.font_medium.render("Activity: ", True, Colors.RGB_BLACK)
+        player_surface = self.font_medium.render(str(player_activity), True, player_color)
+        space_surface = self.font_medium.render(" ", True, Colors.RGB_BLACK)
+        opponent_surface = self.font_medium.render(str(opponent_activity), True, opponent_color)
+
+        # Calculate total width for centering
+        total_width = (label_surface.get_width() + player_surface.get_width() +
+                      space_surface.get_width() + opponent_surface.get_width())
+        start_x = center_x - total_width // 2
+
+        # Draw each part
+        current_x = start_x
+        screen.blit(label_surface, (current_x, activity_y))
+        current_x += label_surface.get_width()
+        screen.blit(player_surface, (current_x, activity_y))
+        current_x += player_surface.get_width()
+        screen.blit(space_surface, (current_x, activity_y))
+        current_x += space_surface.get_width()
+        screen.blit(opponent_surface, (current_x, activity_y))
+
+    def draw_text(self, screen, text: str, x: int, y: int, font: pygame.font.Font,
                   color: Tuple[int, int, int] = None) -> None:
         """Draw text at the specified position"""
         if color is None:
@@ -574,6 +644,15 @@ class ChessDisplay:
 
         # Draw all components
         self.draw_board(screen, board_state, selected_square_coords, highlighted_moves, is_board_flipped, preview_board_state, dragging_piece, drag_origin, mouse_pos)
+
+        # Only calculate activity when dragging to a legal move (like hanging pieces helper)
+        if preview_board_state:
+            # Only recalculate when there's a preview (dragging to legal square)
+            self.draw_activity_display(screen, preview_board_state, is_board_flipped, force_recalculate=True)
+        else:
+            # Show cached activity scores without recalculating
+            self.draw_activity_display(screen, board_state, is_board_flipped, force_recalculate=False)
+
         self.draw_help_panel(screen)
 
         # Draw stalemate overlay if needed

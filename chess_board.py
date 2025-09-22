@@ -611,7 +611,44 @@ class BoardState:
         fullmove = str(self.fullmove_number)
         
         return f"{board_fen} {active_color} {castling} {ep_target} {halfmove} {fullmove}"
-    
+
+    def calculate_activity(self, color: Color) -> int:
+        """Calculate total squares reachable by all pieces of a color (excluding pawns)"""
+        reachable_squares = set()
+
+        # Find all pieces of the specified color (excluding pawns)
+        for row in range(8):
+            for col in range(8):
+                piece = self.get_piece(row, col)
+                if piece and piece.color == color and piece.type != PieceType.PAWN:
+                    # Get pseudo-legal moves (basic piece movement, ignore king safety)
+                    moves = self._get_piece_pseudo_moves(row, col, piece)
+                    for move_row, move_col in moves:
+                        reachable_squares.add((move_row, move_col))
+
+        return len(reachable_squares)
+
+    def _get_piece_pseudo_moves(self, row: int, col: int, piece: Piece) -> List[Tuple[int, int]]:
+        """Get pseudo-legal moves for a piece (basic movement rules only)"""
+        if piece.type == PieceType.ROOK:
+            return self._get_rook_moves(row, col, piece.color)
+        elif piece.type == PieceType.KNIGHT:
+            return self._get_knight_moves(row, col, piece.color)
+        elif piece.type == PieceType.BISHOP:
+            return self._get_bishop_moves(row, col, piece.color)
+        elif piece.type == PieceType.QUEEN:
+            return self._get_queen_moves(row, col, piece.color)
+        elif piece.type == PieceType.KING:
+            return self._get_king_moves(row, col, piece.color)
+        else:
+            return []
+
+    def get_activity_scores(self) -> Tuple[int, int]:
+        """Get activity scores for both colors. Returns (white_activity, black_activity)"""
+        white_activity = self.calculate_activity(Color.WHITE)
+        black_activity = self.calculate_activity(Color.BLACK)
+        return (white_activity, black_activity)
+
     def copy(self) -> 'BoardState':
         """Create a deep copy of the board state"""
         return copy.deepcopy(self)

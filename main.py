@@ -181,6 +181,7 @@ while is_running:
                                 # Clear selection regardless
                                 selected_square_coords = None
                                 highlighted_moves = []
+                                display.invalidate_activity_cache()  # Invalidate cache when move is made
                                 # Reset hover state since highlighted_moves changed
                                 last_hovered_square = None
                                 last_hover_was_legal = False
@@ -237,6 +238,7 @@ while is_running:
                 drag_origin = None
                 selected_square_coords = None
                 highlighted_moves = []
+                display.invalidate_activity_cache()  # Invalidate cache when move is made
                 last_hovered_square = None
                 last_hover_was_legal = False
                 needs_redraw = True
