@@ -15,7 +15,7 @@ screen_info = pygame.display.Info()
 SCREEN_WIDTH = screen_info.current_w
 SCREEN_HEIGHT = screen_info.current_h
 
-# Calculate window size using config values
+# Calculate window size using config values (restored to normal size)
 WINDOW_HEIGHT = int(min(SCREEN_WIDTH * GameConfig.SCREEN_SIZE_PERCENTAGE,
                        SCREEN_HEIGHT * GameConfig.SCREEN_SIZE_PERCENTAGE))
 WINDOW_WIDTH = int(WINDOW_HEIGHT * GameConfig.WINDOW_ASPECT_RATIO)

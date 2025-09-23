@@ -71,6 +71,12 @@ class Colors:
     CHECKBOX_BORDER_UNCHECKED = (180, 180, 180) # Border when unchecked
     LABEL_TEXT_COLOR = (60, 60, 60)         # Dark grey for labels
 
+    # Table colors for statistics
+    TABLE_BORDER = (220, 220, 220)          # Faint gray for cell borders
+    TABLE_FAVORABLE_BG = (230, 255, 230)    # More pronounced green background
+    TABLE_UNFAVORABLE_BG = (255, 230, 230)  # More pronounced red background
+    TABLE_NEUTRAL_BG = (250, 250, 250)      # Light gray for neutral rows
+
     # Game status colors
     STATUS_CHECK = (255, 0, 0)              # Red for check
     STATUS_CHECKMATE = (255, 0, 0)          # Red for checkmate

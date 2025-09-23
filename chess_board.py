@@ -665,6 +665,134 @@ class BoardState:
         black_pawns = self.count_pawns(Color.BLACK)
         return (white_pawns, black_pawns)
 
+    def count_backward_pawns(self, color: Color) -> int:
+        """Count backward pawns - pawns that cannot be defended by other pawns and cannot safely advance"""
+        backward_count = 0
+        enemy_color = Color.BLACK if color == Color.WHITE else Color.WHITE
+
+        for row in range(8):
+            for col in range(8):
+                piece = self.get_piece(row, col)
+                if piece and piece.color == color and piece.type == PieceType.PAWN:
+                    # Direction pawns move (white up, black down)
+                    pawn_direction = -1 if color == Color.WHITE else 1
+
+                    # Check if this pawn can be defended by other pawns
+                    can_be_defended = False
+
+                    # Check diagonally behind for potential defending pawns
+                    defend_row = row + pawn_direction
+                    if 0 <= defend_row < 8:
+                        # Check left diagonal
+                        if col > 0:
+                            defender = self.get_piece(defend_row, col - 1)
+                            if defender and defender.color == color and defender.type == PieceType.PAWN:
+                                can_be_defended = True
+                        # Check right diagonal
+                        if col < 7:
+                            defender = self.get_piece(defend_row, col + 1)
+                            if defender and defender.color == color and defender.type == PieceType.PAWN:
+                                can_be_defended = True
+
+                    # Also check if adjacent pawns could potentially advance to defend
+                    if not can_be_defended:
+                        # Check if pawns on adjacent files could advance to defend this pawn
+                        for adjacent_col in [col - 1, col + 1]:
+                            if 0 <= adjacent_col < 8:
+                                # Look for friendly pawns on this adjacent file that could advance
+                                for check_row in range(8):
+                                    adjacent_piece = self.get_piece(check_row, adjacent_col)
+                                    if adjacent_piece and adjacent_piece.color == color and adjacent_piece.type == PieceType.PAWN:
+                                        # Check if this pawn could potentially advance to defend
+                                        # (simplified: if it's behind our pawn, it could potentially advance)
+                                        if (color == Color.WHITE and check_row > row) or (color == Color.BLACK and check_row < row):
+                                            can_be_defended = True
+                                            break
+                                if can_be_defended:
+                                    break
+
+                    # Check if the pawn can safely advance
+                    can_safely_advance = True
+                    advance_row = row + pawn_direction
+                    if 0 <= advance_row < 8:
+                        # Check if the square in front is controlled by enemy pawns
+                        for enemy_col in [col - 1, col + 1]:
+                            if 0 <= enemy_col < 8:
+                                enemy_attack_row = advance_row + pawn_direction  # Where enemy pawn would be to attack
+                                if 0 <= enemy_attack_row < 8:
+                                    enemy_piece = self.get_piece(enemy_attack_row, enemy_col)
+                                    if enemy_piece and enemy_piece.color == enemy_color and enemy_piece.type == PieceType.PAWN:
+                                        can_safely_advance = False
+                                        break
+
+                    # A pawn is backward if it cannot be defended and cannot safely advance
+                    if not can_be_defended and not can_safely_advance:
+                        backward_count += 1
+
+        return backward_count
+
+    def count_isolated_pawns(self, color: Color) -> int:
+        """Count pawns with no friendly pawns on adjacent files (isolated pawns)"""
+        isolated_count = 0
+        for row in range(8):
+            for col in range(8):
+                piece = self.get_piece(row, col)
+                if piece and piece.color == color and piece.type == PieceType.PAWN:
+                    # Check if there are friendly pawns on adjacent files
+                    has_adjacent_pawn = False
+
+                    # Check left file (col-1)
+                    if col > 0:
+                        for check_row in range(8):
+                            adjacent_piece = self.get_piece(check_row, col - 1)
+                            if adjacent_piece and adjacent_piece.color == color and adjacent_piece.type == PieceType.PAWN:
+                                has_adjacent_pawn = True
+                                break
+
+                    # Check right file (col+1)
+                    if col < 7 and not has_adjacent_pawn:
+                        for check_row in range(8):
+                            adjacent_piece = self.get_piece(check_row, col + 1)
+                            if adjacent_piece and adjacent_piece.color == color and adjacent_piece.type == PieceType.PAWN:
+                                has_adjacent_pawn = True
+                                break
+
+                    if not has_adjacent_pawn:
+                        isolated_count += 1
+        return isolated_count
+
+    def count_doubled_pawns(self, color: Color) -> int:
+        """Count pawns that are doubled (more than one pawn on the same file)"""
+        doubled_count = 0
+
+        # Count pawns per file
+        for col in range(8):
+            pawns_on_file = 0
+            for row in range(8):
+                piece = self.get_piece(row, col)
+                if piece and piece.color == color and piece.type == PieceType.PAWN:
+                    pawns_on_file += 1
+
+            # If more than one pawn on this file, count the extras as doubled
+            if pawns_on_file > 1:
+                doubled_count += pawns_on_file - 1
+
+        return doubled_count
+
+    def get_pawn_statistics(self) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
+        """Get pawn statistics for both colors. Returns ((white_backward, white_isolated, white_doubled), (black_backward, black_isolated, black_doubled))"""
+        white_stats = (
+            self.count_backward_pawns(Color.WHITE),
+            self.count_isolated_pawns(Color.WHITE),
+            self.count_doubled_pawns(Color.WHITE)
+        )
+        black_stats = (
+            self.count_backward_pawns(Color.BLACK),
+            self.count_isolated_pawns(Color.BLACK),
+            self.count_doubled_pawns(Color.BLACK)
+        )
+        return (white_stats, black_stats)
+
     def copy(self) -> 'BoardState':
         """Create a deep copy of the board state"""
         return copy.deepcopy(self)

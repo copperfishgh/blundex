@@ -28,7 +28,7 @@ class ChessDisplay:
         self.HIGHLIGHT = Colors.HIGHLIGHT
         self.SELECTED = Colors.SELECTED
         
-        # Board dimensions using config values
+        # Board dimensions using config values (restored to normal)
         self.board_size = int(min(window_width, window_height * 0.9) * GameConfig.BOARD_SIZE_PERCENTAGE)
         self.square_size = self.board_size // GameConstants.BOARD_SIZE
 
@@ -149,8 +149,8 @@ class ChessDisplay:
 
         return circle_surface
 
-    def draw_help_panel(self, screen) -> None:
-        """Draw the help panel with checkboxes on the right side of the board"""
+    def draw_help_panel(self, screen, board_state=None, is_board_flipped=False) -> None:
+        """Draw the help panel with checkboxes on the right side of the board and statistics below"""
         # Draw panel background (optional - subtle background)
         panel_rect = pygame.Rect(self.help_panel_x, self.help_panel_y,
                                self.help_panel_width, self.board_size)
@@ -162,6 +162,113 @@ class ChessDisplay:
         for i, option in enumerate(self.help_options):
             self._draw_checkbox(screen, self.help_panel_x + 10, current_y, option)
             current_y += self.checkbox_spacing
+
+        # Draw statistics below checkboxes if board_state is provided
+        if board_state:
+            self._draw_panel_statistics(screen, board_state, is_board_flipped, current_y + 20)
+
+    def _draw_panel_statistics(self, screen, board_state, is_board_flipped: bool, start_y: int) -> None:
+        """Draw activity and pawn statistics in spreadsheet-style table format"""
+        # Table dimensions
+        table_width = self.help_panel_width - 20  # 10px margin on each side
+        table_x = self.help_panel_x + 10
+        row_height = self.font_small.get_height() + 6  # Extra padding for readability
+
+        # Column widths (proportional to table width)
+        col1_width = int(table_width * 0.5)   # Statistic name (left)
+        col2_width = int(table_width * 0.25)  # Player score (center)
+        col3_width = int(table_width * 0.25)  # Opponent score (center)
+
+        # Gather all statistics data
+        white_activity, black_activity = board_state.get_activity_scores()
+        white_pawns, black_pawns = board_state.get_pawn_counts()
+        (white_stats, black_stats) = board_state.get_pawn_statistics()
+
+        if is_board_flipped:
+            player_activity, opponent_activity = black_activity, white_activity
+            player_pawns, opponent_pawns = black_pawns, white_pawns
+            player_stats, opponent_stats = black_stats, white_stats
+        else:
+            player_activity, opponent_activity = white_activity, black_activity
+            player_pawns, opponent_pawns = white_pawns, black_pawns
+            player_stats, opponent_stats = white_stats, black_stats
+
+        player_backward, player_isolated, player_doubled = player_stats
+        opponent_backward, opponent_isolated, opponent_doubled = opponent_stats
+
+        # Table data: (name, player_value, opponent_value, higher_is_better)
+        table_data = [
+            ("Activity", player_activity, opponent_activity, True),
+            ("Pawns", player_pawns, opponent_pawns, True),
+            ("Backward", player_backward, opponent_backward, False),  # Lower is better
+            ("Isolated", player_isolated, opponent_isolated, False),  # Lower is better
+            ("Doubled", player_doubled, opponent_doubled, False)      # Lower is better
+        ]
+
+        current_y = start_y
+
+        # Draw each row
+        for row_name, player_val, opponent_val, higher_is_better in table_data:
+            # Determine row background color based on favorability
+            if player_val == opponent_val:
+                row_bg_color = Colors.TABLE_NEUTRAL_BG
+            elif higher_is_better:
+                # For Activity and Pawns: higher is better
+                if player_val > opponent_val:
+                    row_bg_color = Colors.TABLE_FAVORABLE_BG
+                else:
+                    row_bg_color = Colors.TABLE_UNFAVORABLE_BG
+            else:
+                # For Backward, Isolated, Doubled: lower is better
+                if player_val < opponent_val:
+                    row_bg_color = Colors.TABLE_FAVORABLE_BG
+                else:
+                    row_bg_color = Colors.TABLE_UNFAVORABLE_BG
+
+            # Draw row background
+            row_rect = pygame.Rect(table_x, current_y, table_width, row_height)
+            pygame.draw.rect(screen, row_bg_color, row_rect)
+
+            # Draw cell borders (faint gray)
+            # Top border
+            pygame.draw.line(screen, Colors.TABLE_BORDER,
+                           (table_x, current_y), (table_x + table_width, current_y))
+            # Left border
+            pygame.draw.line(screen, Colors.TABLE_BORDER,
+                           (table_x, current_y), (table_x, current_y + row_height))
+            # Vertical separators
+            pygame.draw.line(screen, Colors.TABLE_BORDER,
+                           (table_x + col1_width, current_y), (table_x + col1_width, current_y + row_height))
+            pygame.draw.line(screen, Colors.TABLE_BORDER,
+                           (table_x + col1_width + col2_width, current_y),
+                           (table_x + col1_width + col2_width, current_y + row_height))
+            # Right border
+            pygame.draw.line(screen, Colors.TABLE_BORDER,
+                           (table_x + table_width, current_y), (table_x + table_width, current_y + row_height))
+
+            # Column 1: Statistic name (left-aligned)
+            name_surface = self.font_small.render(row_name, True, Colors.RGB_BLACK)
+            name_x = table_x + 5  # 5px padding from left
+            name_y = current_y + (row_height - name_surface.get_height()) // 2
+            screen.blit(name_surface, (name_x, name_y))
+
+            # Column 2: Player value (center-aligned)
+            player_surface = self.font_small.render(str(player_val), True, Colors.RGB_BLACK)
+            player_x = table_x + col1_width + (col2_width - player_surface.get_width()) // 2
+            player_y = current_y + (row_height - player_surface.get_height()) // 2
+            screen.blit(player_surface, (player_x, player_y))
+
+            # Column 3: Opponent value (center-aligned)
+            opponent_surface = self.font_small.render(str(opponent_val), True, Colors.RGB_BLACK)
+            opponent_x = table_x + col1_width + col2_width + (col3_width - opponent_surface.get_width()) // 2
+            opponent_y = current_y + (row_height - opponent_surface.get_height()) // 2
+            screen.blit(opponent_surface, (opponent_x, opponent_y))
+
+            current_y += row_height
+
+        # Draw bottom border of the table
+        pygame.draw.line(screen, Colors.TABLE_BORDER,
+                       (table_x, current_y), (table_x + table_width, current_y))
 
     def _draw_checkbox(self, screen, x: int, y: int, option: dict) -> None:
         """Draw a single stylish checkbox with label"""
@@ -499,9 +606,10 @@ class ChessDisplay:
             player_activity = white_activity
             opponent_activity = black_activity
 
-        # Position below coordinates
+        # Position below coordinates using dynamic spacing
         center_x = self.board_margin_x + self.board_size // 2
-        activity_y = self.board_margin_y + self.board_size + 35
+        font_height = self.font_medium.get_height()
+        activity_y = self.board_margin_y + self.board_size + font_height + 10  # 10px gap below board
 
         # Create activity text: "Activity: XX YY"
         activity_text = f"Activity: {player_activity} {opponent_activity}"
@@ -553,9 +661,11 @@ class ChessDisplay:
             player_pawns = white_pawns
             opponent_pawns = black_pawns
 
-        # Position below activity display
+        # Position below activity display using dynamic spacing
         center_x = self.board_margin_x + self.board_size // 2
-        pawn_y = self.board_margin_y + self.board_size + 60  # Below activity line
+        font_height = self.font_medium.get_height()
+        line_spacing = font_height + 2  # Small gap between lines
+        pawn_y = self.board_margin_y + self.board_size + font_height + 10 + line_spacing  # Below activity line
 
         # Create pawn text: "Pawns: XX YY"
         pawn_text = f"Pawns: {player_pawns} {opponent_pawns}"
@@ -594,6 +704,76 @@ class ChessDisplay:
         screen.blit(space_surface, (current_x, pawn_y))
         current_x += space_surface.get_width()
         screen.blit(opponent_surface, (current_x, pawn_y))
+
+    def draw_pawn_statistics_display(self, screen, board_state: BoardState, is_board_flipped: bool = False) -> None:
+        """Draw pawn statistics (backward, isolated, doubled) on separate lines underneath the pawn count display"""
+        (white_stats, black_stats) = board_state.get_pawn_statistics()
+        white_backward, white_isolated, white_doubled = white_stats
+        black_backward, black_isolated, black_doubled = black_stats
+
+        # Determine player vs opponent based on board orientation
+        if is_board_flipped:
+            player_stats = black_stats
+            opponent_stats = white_stats
+        else:
+            player_stats = white_stats
+            opponent_stats = black_stats
+
+        player_backward, player_isolated, player_doubled = player_stats
+        opponent_backward, opponent_isolated, opponent_doubled = opponent_stats
+
+        # Get font height for dynamic spacing
+        font_height = self.font_medium.get_height()
+        line_spacing = font_height + 2  # Small gap between lines
+
+        # Starting position below pawn count display
+        center_x = self.board_margin_x + self.board_size // 2
+        start_y = self.board_margin_y + self.board_size + font_height + 10 + (2 * line_spacing)  # Below pawns line
+
+        # Statistics data with full names
+        stats_data = [
+            ("Backward", player_backward, opponent_backward),
+            ("Isolated", player_isolated, opponent_isolated),
+            ("Doubled", player_doubled, opponent_doubled)
+        ]
+
+        # Draw each statistic on its own line
+        for i, (stat_name, player_count, opponent_count) in enumerate(stats_data):
+            current_y = start_y + (i * line_spacing)
+
+            # Since lower is better for all these statistics, determine colors
+            if player_count < opponent_count:
+                player_color = Colors.RGB_BLACK  # Bold black (better)
+                opponent_color = Colors.ANNOTATION_NEUTRAL  # Medium grey (worse)
+            elif opponent_count < player_count:
+                player_color = Colors.ANNOTATION_NEUTRAL  # Medium grey (worse)
+                opponent_color = Colors.RGB_BLACK  # Bold black (better)
+            else:
+                player_color = Colors.RGB_BLACK
+                opponent_color = Colors.RGB_BLACK
+
+            # Render text parts: "Hanging: X Y" format
+            label_surface = self.font_medium.render(f"{stat_name}: ", True, Colors.RGB_BLACK)
+            player_font = self.font_medium_bold if player_color == Colors.RGB_BLACK else self.font_medium
+            opponent_font = self.font_medium_bold if opponent_color == Colors.RGB_BLACK else self.font_medium
+            player_surface = player_font.render(str(player_count), True, player_color)
+            space_surface = self.font_medium.render(" ", True, Colors.RGB_BLACK)
+            opponent_surface = opponent_font.render(str(opponent_count), True, opponent_color)
+
+            # Calculate total width for centering
+            total_width = (label_surface.get_width() + player_surface.get_width() +
+                          space_surface.get_width() + opponent_surface.get_width())
+            start_x = center_x - total_width // 2
+
+            # Draw each part
+            current_x = start_x
+            screen.blit(label_surface, (current_x, current_y))
+            current_x += label_surface.get_width()
+            screen.blit(player_surface, (current_x, current_y))
+            current_x += player_surface.get_width()
+            screen.blit(space_surface, (current_x, current_y))
+            current_x += space_surface.get_width()
+            screen.blit(opponent_surface, (current_x, current_y))
 
     def draw_text(self, screen, text: str, x: int, y: int, font: pygame.font.Font,
                   color: Tuple[int, int, int] = None) -> None:
@@ -704,17 +884,9 @@ class ChessDisplay:
         # Draw all components
         self.draw_board(screen, board_state, selected_square_coords, highlighted_moves, is_board_flipped, preview_board_state, dragging_piece, drag_origin, mouse_pos)
 
-        # Only calculate activity when dragging to a legal move (like hanging pieces helper)
-        if preview_board_state:
-            # Only recalculate when there's a preview (dragging to legal square)
-            self.draw_activity_display(screen, preview_board_state, is_board_flipped, force_recalculate=True)
-            self.draw_pawn_display(screen, preview_board_state, is_board_flipped)
-        else:
-            # Show cached activity scores without recalculating
-            self.draw_activity_display(screen, board_state, is_board_flipped, force_recalculate=False)
-            self.draw_pawn_display(screen, board_state, is_board_flipped)
-
-        self.draw_help_panel(screen)
+        # Draw help panel with statistics (uses preview_board_state when dragging to legal square)
+        stats_board_state = preview_board_state if preview_board_state else board_state
+        self.draw_help_panel(screen, stats_board_state, is_board_flipped)
 
         # Draw stalemate overlay if needed
         if board_state.is_in_stalemate:
