@@ -1,8 +1,0 @@
-0000000000000000000000000000000000000000 8ffdc8d2eb8469b71eaeb2f8628635c873cd5d39 Rick Franklin <rick.franklin@gmail.com> 1757900090 -0500	branch: Created from HEAD
-8ffdc8d2eb8469b71eaeb2f8628635c873cd5d39 ff5b869e1ffb61831d6007fb49d13ceb6e08eca4 Rick Franklin <rick.franklin@gmail.com> 1757902232 -0500	commit: Implement material-weighted hanging pieces system
-ff5b869e1ffb61831d6007fb49d13ceb6e08eca4 3d68df2bb4ee894bf2ce10daf297abc9222b85c4 Rick Franklin <rick.franklin@gmail.com> 1757903536 -0500	commit: Refine drag-and-drop system with square snapping and performance optimization
-3d68df2bb4ee894bf2ce10daf297abc9222b85c4 b0c17814a4f60425d3ddbd079e260f31398cd088 copperfishgh <rick.franklin@gmail.com> 1757949648 -0500	commit: claude settings update
-b0c17814a4f60425d3ddbd079e260f31398cd088 ddbd3b4e6dc15df516a01f3d008d6752623dbf4f copperfishgh <rick.franklin@gmail.com> 1757950885 -0500	commit: CLAUDE.md is now obsolete due to README.md
-ddbd3b4e6dc15df516a01f3d008d6752623dbf4f bf1cff76f5ae15d3d13cba32627cdb45b8e004b5 copperfishgh <rick.franklin@gmail.com> 1757955121 -0500	commit: Clean up unused code and constants
-bf1cff76f5ae15d3d13cba32627cdb45b8e004b5 d2a0a849b8350fae639ff1dbcb82c99f8d5d7b25 copperfishgh <rick.franklin@gmail.com> 1757955575 -0500	commit: Add tilde key reset functionality
-d2a0a849b8350fae639ff1dbcb82c99f8d5d7b25 f4eb62c4c367c40c4f7a83214871d305dcf68ec1 copperfishgh <rick.franklin@gmail.com> 1757958701 -0500	commit: Change application title to Testy

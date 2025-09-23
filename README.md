@@ -51,6 +51,7 @@ Chess has two main components: **tactical accuracy** (not hanging pieces) and **
 ## Running Blundex
 
 ```bash
+pip install -r requirements.txt
 python main.py
 ```
 
@@ -179,13 +180,6 @@ Strategic Analysis:
 
 You make the strategic decisions. Blundex prevents the tactical oversights and suggests positional improvements.
 
-## Future: Rust Conversion
-
-Once the Python version is complete, Blundex will be converted to Rust for:
-- Single executable distribution (~15MB)
-- Better performance for real-time analysis
-- Memory safety for chess engine calculations
-- Learning modern systems programming
 
 ---
 

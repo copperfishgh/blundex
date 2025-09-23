@@ -1,9 +1,0 @@
-Change application title to Testy
-
-Updated window caption from "Chess Game" to "Testy" as requested.
-Also cleaned up some leftover import and formatting from previous
-focus handling attempts.
-
-🤖 Generated with [Claude Code](https://claude.ai/code)
-
-Co-Authored-By: Claude <noreply@anthropic.com>

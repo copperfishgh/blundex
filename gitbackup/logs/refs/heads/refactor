@@ -1,3 +1,0 @@
-0000000000000000000000000000000000000000 b44a455a5bb0e062ee0a29ce4ab360d99512ecc5 Rick Franklin <rick.franklin@gmail.com> 1757814160 -0500	branch: Created from HEAD
-b44a455a5bb0e062ee0a29ce4ab360d99512ecc5 4f322c81af0e421fc8a0ffbf18440a34b47858f5 Rick Franklin <rick.franklin@gmail.com> 1757815899 -0500	commit: names refactored
-4f322c81af0e421fc8a0ffbf18440a34b47858f5 18c0d31ee17780e0e5f635ec5b8c3c240eeafd2f Rick Franklin <rick.franklin@gmail.com> 1757816735 -0500	commit: Refactor code structure for better organization and maintainability

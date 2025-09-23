@@ -1,3 +1,0 @@
-0000000000000000000000000000000000000000 335472f8ed1c1a7097d30037973977d25a1e909d Rick Franklin <rick.franklin@gmail.com> 1757897170 -0500	branch: Created from HEAD
-335472f8ed1c1a7097d30037973977d25a1e909d 335472f8ed1c1a7097d30037973977d25a1e909d Rick Franklin <rick.franklin@gmail.com> 1757897558 -0500	Branch: renamed refs/heads/counting to refs/heads/preview
-335472f8ed1c1a7097d30037973977d25a1e909d 8ffdc8d2eb8469b71eaeb2f8628635c873cd5d39 Rick Franklin <rick.franklin@gmail.com> 1757899764 -0500	commit: Implement move preview system with hanging pieces evaluation
