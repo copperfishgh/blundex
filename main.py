@@ -265,10 +265,16 @@ while is_running:
         to_row, to_col = current_hovered_square
         preview_board_state.make_move(from_row, from_col, to_row, to_col)
 
+    # Update statistics hover detection
+    previous_hovered_statistic = display.hovered_statistic
+    display.update_statistics_hover(current_mouse_pos)
+    statistics_hover_changed = (display.hovered_statistic != previous_hovered_statistic)
+
     # Only redraw if hover state changed in a meaningful way
     hover_state_changed = (
         current_hovered_square != last_hovered_square or  # Different square
-        current_hover_is_legal != last_hover_was_legal    # Legal status changed
+        current_hover_is_legal != last_hover_was_legal or # Legal status changed
+        statistics_hover_changed                          # Statistics hover changed
     )
 
     if hover_state_changed:

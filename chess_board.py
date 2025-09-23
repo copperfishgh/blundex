@@ -779,17 +779,63 @@ class BoardState:
 
         return doubled_count
 
-    def get_pawn_statistics(self) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
-        """Get pawn statistics for both colors. Returns ((white_backward, white_isolated, white_doubled), (black_backward, black_isolated, black_doubled))"""
+    def count_passed_pawns(self, color: Color) -> int:
+        """Count passed pawns - pawns with no opponent pawns blocking their path to promotion"""
+        passed_count = 0
+        enemy_color = Color.BLACK if color == Color.WHITE else Color.WHITE
+
+        # Define the direction the pawn moves for promotion
+        if color == Color.WHITE:
+            promotion_direction = -1  # White pawns move toward row 0
+            start_row_check = 6       # Don't count pawns on the 7th rank (about to promote anyway)
+        else:
+            promotion_direction = 1   # Black pawns move toward row 7
+            start_row_check = 1       # Don't count pawns on the 2nd rank
+
+        # Check each pawn
+        for row in range(8):
+            for col in range(8):
+                piece = self.get_piece(row, col)
+                if piece and piece.color == color and piece.type == PieceType.PAWN:
+                    # Skip pawns very close to promotion (they're obviously passed)
+                    if (color == Color.WHITE and row <= start_row_check) or (color == Color.BLACK and row >= start_row_check):
+
+                        # Check if this pawn is passed
+                        is_passed = True
+
+                        # Check the path to promotion on this file and adjacent files
+                        for check_col in [col - 1, col, col + 1]:
+                            if 0 <= check_col <= 7:  # Valid column
+                                # Check all squares from current position to promotion rank
+                                check_row = row + promotion_direction
+                                while 0 <= check_row <= 7:
+                                    enemy_piece = self.get_piece(check_row, check_col)
+                                    if enemy_piece and enemy_piece.color == enemy_color and enemy_piece.type == PieceType.PAWN:
+                                        is_passed = False
+                                        break
+                                    check_row += promotion_direction
+
+                                if not is_passed:
+                                    break
+
+                        if is_passed:
+                            passed_count += 1
+
+        return passed_count
+
+    def get_pawn_statistics(self) -> Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]:
+        """Get pawn statistics for both colors. Returns ((white_backward, white_isolated, white_doubled, white_passed), (black_backward, black_isolated, black_doubled, black_passed))"""
         white_stats = (
             self.count_backward_pawns(Color.WHITE),
             self.count_isolated_pawns(Color.WHITE),
-            self.count_doubled_pawns(Color.WHITE)
+            self.count_doubled_pawns(Color.WHITE),
+            self.count_passed_pawns(Color.WHITE)
         )
         black_stats = (
             self.count_backward_pawns(Color.BLACK),
             self.count_isolated_pawns(Color.BLACK),
-            self.count_doubled_pawns(Color.BLACK)
+            self.count_doubled_pawns(Color.BLACK),
+            self.count_passed_pawns(Color.BLACK)
         )
         return (white_stats, black_stats)
 

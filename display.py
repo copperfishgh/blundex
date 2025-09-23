@@ -87,6 +87,10 @@ class ChessDisplay:
         self.cached_activity_black = 0
         self.activity_cache_valid = False
 
+        # Statistics hover feedback system
+        self.hovered_statistic = None  # (stat_type, player_or_opponent) e.g., ("activity", "player")
+        self.statistic_cell_rects = {}  # Track clickable areas for each statistic
+
     def invalidate_activity_cache(self):
         """Invalidate activity cache when board state changes"""
         self.activity_cache_valid = False
@@ -169,6 +173,9 @@ class ChessDisplay:
 
     def _draw_panel_statistics(self, screen, board_state, is_board_flipped: bool, start_y: int) -> None:
         """Draw activity and pawn statistics in spreadsheet-style table format"""
+        # Clear previous cell rectangles
+        self.statistic_cell_rects = {}
+
         # Table dimensions
         table_width = self.help_panel_width - 20  # 10px margin on each side
         table_x = self.help_panel_x + 10
@@ -193,8 +200,8 @@ class ChessDisplay:
             player_pawns, opponent_pawns = white_pawns, black_pawns
             player_stats, opponent_stats = white_stats, black_stats
 
-        player_backward, player_isolated, player_doubled = player_stats
-        opponent_backward, opponent_isolated, opponent_doubled = opponent_stats
+        player_backward, player_isolated, player_doubled, player_passed = player_stats
+        opponent_backward, opponent_isolated, opponent_doubled, opponent_passed = opponent_stats
 
         # Table data: (name, player_value, opponent_value, higher_is_better)
         table_data = [
@@ -202,7 +209,8 @@ class ChessDisplay:
             ("Pawns", player_pawns, opponent_pawns, True),
             ("Backward", player_backward, opponent_backward, False),  # Lower is better
             ("Isolated", player_isolated, opponent_isolated, False),  # Lower is better
-            ("Doubled", player_doubled, opponent_doubled, False)      # Lower is better
+            ("Doubled", player_doubled, opponent_doubled, False),     # Lower is better
+            ("Passed", player_passed, opponent_passed, True)         # Higher is better
         ]
 
         current_y = start_y
@@ -264,11 +272,212 @@ class ChessDisplay:
             opponent_y = current_y + (row_height - opponent_surface.get_height()) // 2
             screen.blit(opponent_surface, (opponent_x, opponent_y))
 
+            # Store cell rectangles for hover detection
+            player_cell_rect = pygame.Rect(table_x + col1_width, current_y, col2_width, row_height)
+            opponent_cell_rect = pygame.Rect(table_x + col1_width + col2_width, current_y, col3_width, row_height)
+
+            # Use lowercase for consistent key names
+            stat_key = row_name.lower()
+            self.statistic_cell_rects[f"{stat_key}_player"] = player_cell_rect
+            self.statistic_cell_rects[f"{stat_key}_opponent"] = opponent_cell_rect
+
             current_y += row_height
 
         # Draw bottom border of the table
         pygame.draw.line(screen, Colors.TABLE_BORDER,
                        (table_x, current_y), (table_x + table_width, current_y))
+
+    def update_statistics_hover(self, mouse_pos: tuple) -> None:
+        """Update which statistic cell is being hovered"""
+        self.hovered_statistic = None
+
+        for cell_key, cell_rect in self.statistic_cell_rects.items():
+            if cell_rect.collidepoint(mouse_pos):
+                # Parse the cell key (e.g., "activity_player" -> ("activity", "player"))
+                parts = cell_key.split('_')
+                if len(parts) >= 2:
+                    stat_type = parts[0]
+                    player_side = parts[1]
+                    self.hovered_statistic = (stat_type, player_side)
+                break
+
+    def get_highlighted_pieces_for_statistic(self, board_state, stat_type: str, player_side: str, is_board_flipped: bool):
+        """Get pieces or squares to highlight based on the hovered statistic"""
+        if not stat_type or not player_side:
+            return []
+
+        # Determine which color we're showing (player vs opponent)
+        if is_board_flipped:
+            player_color = Color.BLACK
+            opponent_color = Color.WHITE
+        else:
+            player_color = Color.WHITE
+            opponent_color = Color.BLACK
+
+        target_color = player_color if player_side == "player" else opponent_color
+
+        if stat_type == "activity":
+            return self._get_activity_squares(board_state, target_color)
+        elif stat_type == "pawns":
+            return self._get_pawn_pieces(board_state, target_color)
+        elif stat_type == "backward":
+            return self._get_backward_pawn_pieces(board_state, target_color)
+        elif stat_type == "isolated":
+            return self._get_isolated_pawn_pieces(board_state, target_color)
+        elif stat_type == "doubled":
+            return self._get_doubled_pawn_pieces(board_state, target_color)
+        elif stat_type == "passed":
+            return self._get_passed_pawn_pieces(board_state, target_color)
+
+        return []
+
+    def _get_activity_squares(self, board_state, color: Color):
+        """Get all squares that pieces of this color can reach"""
+        reachable_squares = set()
+        for row in range(8):
+            for col in range(8):
+                piece = board_state.get_piece(row, col)
+                if piece and piece.color == color and piece.type != PieceType.PAWN:
+                    moves = board_state._get_piece_pseudo_moves(row, col, piece)
+                    for move_row, move_col in moves:
+                        reachable_squares.add((move_row, move_col))
+        return list(reachable_squares)
+
+    def _get_pawn_pieces(self, board_state, color: Color):
+        """Get all pawn pieces of this color"""
+        pawn_pieces = []
+        for row in range(8):
+            for col in range(8):
+                piece = board_state.get_piece(row, col)
+                if piece and piece.color == color and piece.type == PieceType.PAWN:
+                    pawn_pieces.append((row, col))
+        return pawn_pieces
+
+    def _get_backward_pawn_pieces(self, board_state, color: Color):
+        """Get backward pawn pieces of this color"""
+        backward_pawns = []
+        enemy_color = Color.BLACK if color == Color.WHITE else Color.WHITE
+
+        for row in range(8):
+            for col in range(8):
+                piece = board_state.get_piece(row, col)
+                if piece and piece.color == color and piece.type == PieceType.PAWN:
+                    # Check if this is a backward pawn (simplified version of the main logic)
+                    pawn_direction = -1 if color == Color.WHITE else 1
+
+                    # Check if pawn can be defended
+                    can_be_defended = False
+                    defend_row = row + pawn_direction
+                    if 0 <= defend_row < 8:
+                        for defend_col in [col - 1, col + 1]:
+                            if 0 <= defend_col < 8:
+                                defender = board_state.get_piece(defend_row, defend_col)
+                                if defender and defender.color == color and defender.type == PieceType.PAWN:
+                                    can_be_defended = True
+                                    break
+
+                    # Check if pawn can safely advance
+                    can_safely_advance = True
+                    advance_row = row + pawn_direction
+                    if 0 <= advance_row < 8:
+                        for enemy_col in [col - 1, col + 1]:
+                            if 0 <= enemy_col < 8:
+                                enemy_attack_row = advance_row + pawn_direction
+                                if 0 <= enemy_attack_row < 8:
+                                    enemy_piece = board_state.get_piece(enemy_attack_row, enemy_col)
+                                    if enemy_piece and enemy_piece.color == enemy_color and enemy_piece.type == PieceType.PAWN:
+                                        can_safely_advance = False
+                                        break
+
+                    if not can_be_defended and not can_safely_advance:
+                        backward_pawns.append((row, col))
+
+        return backward_pawns
+
+    def _get_isolated_pawn_pieces(self, board_state, color: Color):
+        """Get isolated pawn pieces of this color"""
+        isolated_pawns = []
+        for row in range(8):
+            for col in range(8):
+                piece = board_state.get_piece(row, col)
+                if piece and piece.color == color and piece.type == PieceType.PAWN:
+                    # Check if there are friendly pawns on adjacent files
+                    has_adjacent_pawn = False
+                    for adjacent_col in [col - 1, col + 1]:
+                        if 0 <= adjacent_col < 8:
+                            for check_row in range(8):
+                                adjacent_piece = board_state.get_piece(check_row, adjacent_col)
+                                if adjacent_piece and adjacent_piece.color == color and adjacent_piece.type == PieceType.PAWN:
+                                    has_adjacent_pawn = True
+                                    break
+                            if has_adjacent_pawn:
+                                break
+
+                    if not has_adjacent_pawn:
+                        isolated_pawns.append((row, col))
+
+        return isolated_pawns
+
+    def _get_doubled_pawn_pieces(self, board_state, color: Color):
+        """Get doubled pawn pieces of this color"""
+        doubled_pawns = []
+        # Count pawns per file and identify doubled ones
+        for col in range(8):
+            pawns_on_file = []
+            for row in range(8):
+                piece = board_state.get_piece(row, col)
+                if piece and piece.color == color and piece.type == PieceType.PAWN:
+                    pawns_on_file.append((row, col))
+
+            # If more than one pawn on this file, all but the first are "doubled"
+            if len(pawns_on_file) > 1:
+                doubled_pawns.extend(pawns_on_file[1:])  # Add all but the first
+
+        return doubled_pawns
+
+    def _get_passed_pawn_pieces(self, board_state, color: Color):
+        """Get passed pawn pieces of this color"""
+        passed_pawns = []
+        enemy_color = Color.BLACK if color == Color.WHITE else Color.WHITE
+
+        # Define the direction the pawn moves for promotion
+        if color == Color.WHITE:
+            promotion_direction = -1  # White pawns move toward row 0
+            start_row_check = 6       # Don't count pawns on the 7th rank (about to promote anyway)
+        else:
+            promotion_direction = 1   # Black pawns move toward row 7
+            start_row_check = 1       # Don't count pawns on the 2nd rank
+
+        # Check each pawn
+        for row in range(8):
+            for col in range(8):
+                piece = board_state.get_piece(row, col)
+                if piece and piece.color == color and piece.type == PieceType.PAWN:
+                    # Skip pawns very close to promotion (they're obviously passed)
+                    if (color == Color.WHITE and row <= start_row_check) or (color == Color.BLACK and row >= start_row_check):
+
+                        # Check if this pawn is passed
+                        is_passed = True
+
+                        # Check the path to promotion on this file and adjacent files
+                        for check_col in [col - 1, col, col + 1]:
+                            if 0 <= check_col <= 7:  # Valid column
+                                # Check all squares from current position to promotion rank
+                                check_row = row + promotion_direction
+                                while 0 <= check_row <= 7:
+                                    enemy_piece = board_state.get_piece(check_row, check_col)
+                                    if enemy_piece and enemy_piece.color == enemy_color and enemy_piece.type == PieceType.PAWN:
+                                        is_passed = False
+                                        break
+                                    check_row += promotion_direction
+
+                                if not is_passed:
+                                    break
+
+                        if is_passed:
+                            passed_pawns.append((row, col))
+
+        return passed_pawns
 
     def _draw_checkbox(self, screen, x: int, y: int, option: dict) -> None:
         """Draw a single stylish checkbox with label"""
@@ -362,7 +571,7 @@ class ChessDisplay:
         else:
             indicator_color = Colors.ANNOTATION_POSITIVE  # Green for opponent's hanging pieces (opportunity)
 
-        # Use same border thickness as orange highlights for consistency
+        # Use same border thickness as blue highlights for consistency
         border_thickness = 4
 
         # Draw border on all four edges
@@ -488,12 +697,25 @@ class ChessDisplay:
                     if (row, col) in interesting_squares:
                         self.draw_exchange_indicator(screen, x, y)
 
-        # Draw exchange evaluation piece highlights (orange borders) if hovering
+        # Draw exchange evaluation piece highlights (blue borders) if hovering
         if mouse_pos:
             evaluation_board = preview_board_state if preview_board_state else board_state
             highlight_positions = self.get_exchange_highlights(mouse_pos, evaluation_board, is_board_flipped)
 
             for highlight_row, highlight_col in highlight_positions:
+                # Convert board coordinates to display coordinates
+                display_pos = self.get_square_display_position(highlight_row, highlight_col, is_board_flipped)
+                if display_pos:
+                    x, y = display_pos
+                    self.draw_piece_highlight(screen, x, y)
+
+        # Draw statistics highlighting if hovering over spreadsheet
+        if self.hovered_statistic:
+            stat_type, player_side = self.hovered_statistic
+            evaluation_board = preview_board_state if preview_board_state else board_state
+            highlight_items = self.get_highlighted_pieces_for_statistic(evaluation_board, stat_type, player_side, is_board_flipped)
+
+            for highlight_row, highlight_col in highlight_items:
                 # Convert board coordinates to display coordinates
                 display_pos = self.get_square_display_position(highlight_row, highlight_col, is_board_flipped)
                 if display_pos:
@@ -799,10 +1021,10 @@ class ChessDisplay:
         pygame.draw.polygon(screen, indicator_color, triangle_points)
 
     def draw_piece_highlight(self, screen, x: int, y: int) -> None:
-        """Draw orange highlighting around a piece (for attacker/defender display)"""
-        # Draw a thick orange border around the piece
+        """Draw blue highlighting around a piece (for attacker/defender display)"""
+        # Draw a thick blue border around the piece
         border_thickness = 4
-        highlight_color = (255, 165, 0)  # Orange color
+        highlight_color = (0, 100, 255)  # Blue color
 
         # Draw border around the entire square
         border_rect = pygame.Rect(x, y, self.square_size, self.square_size)
@@ -811,7 +1033,7 @@ class ChessDisplay:
     def get_exchange_highlights(self, mouse_pos: Tuple[int, int], board_state, is_board_flipped: bool = False) -> List[Tuple[int, int]]:
         """
         Get list of piece positions to highlight based on mouse hover over tactical squares.
-        Returns list of (row, col) positions that should be highlighted in orange.
+        Returns list of (row, col) positions that should be highlighted in blue.
         """
         if not self.is_help_option_enabled("exchange_evaluation"):
             return []
