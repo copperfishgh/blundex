@@ -858,6 +858,46 @@ class BoardState:
         result += "  a b c d e f g h\n"
         return result
 
+    def load_pgn_file(self, filename: str) -> bool:
+        """Load a PGN file and apply the first game to the board"""
+        try:
+            from pgn_manager import PGNManager
+            games = PGNManager.load_pgn_file(filename)
+            if games:
+                return PGNManager.apply_pgn_game_to_board(self, games[0])
+            return False
+        except ImportError:
+            print("PGN functionality not available")
+            return False
+        except Exception as e:
+            print(f"Failed to load PGN file: {e}")
+            return False
+
+    def save_pgn_file(self, filename: str, white_player: str = "Player", black_player: str = "Opponent", event: str = "Casual Game") -> bool:
+        """Save current game state to a PGN file"""
+        try:
+            from pgn_manager import PGNManager, PGNGame
+            game = PGNManager.create_game_from_board_state(self, white_player, black_player, event)
+            PGNManager.save_pgn_file(filename, [game])
+            return True
+        except ImportError:
+            print("PGN functionality not available")
+            return False
+        except Exception as e:
+            print(f"Failed to save PGN file: {e}")
+            return False
+
+    def export_current_game_pgn(self, white_player: str = "Player", black_player: str = "Opponent", event: str = "Casual Game") -> str:
+        """Export current game state as PGN string"""
+        try:
+            from pgn_manager import PGNManager
+            game = PGNManager.create_game_from_board_state(self, white_player, black_player, event)
+            return game.to_pgn()
+        except ImportError:
+            return "PGN functionality not available"
+        except Exception as e:
+            return f"Failed to export PGN: {e}"
+
     def get_possible_moves(self, row: int, col: int) -> List[Tuple[int, int]]:
         """Get all legal moves for a piece at the given position (filters out moves that leave king in check)"""
         piece = self.get_piece(row, col)
@@ -1079,10 +1119,8 @@ class BoardState:
         state_copy.undo_stack = []  # Don't copy the undo/redo stacks
         state_copy.redo_stack = []
 
-        # Add to undo stack (limit to 50 moves to prevent memory issues)
+        # Add to undo stack (unlimited history)
         self.undo_stack.append(state_copy)
-        if len(self.undo_stack) > 50:
-            self.undo_stack.pop(0)
 
         # Clear redo stack since we're making a new move
         self.redo_stack.clear()

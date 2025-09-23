@@ -1,0 +1,9 @@
+[Event "Test Game"]
+[Site "Blundex Chess"]
+[Date "2025.01.15"]
+[Round "1"]
+[White "Player"]
+[Black "Opponent"]
+[Result "*"]
+
+1. e2e4 e7e5 2. g1f3 b8c6 3. f1c4 g8f6 *

@@ -1,9 +1,19 @@
 import pygame
 import sys
+import os
 from chess_board import BoardState
 from display import ChessDisplay
 from config import GameConfig, Colors
 from sound_manager import get_sound_manager
+
+# Try to import file dialog functionality
+try:
+    import tkinter as tk
+    from tkinter import filedialog
+    DIALOG_AVAILABLE = True
+except ImportError:
+    DIALOG_AVAILABLE = False
+    print("File dialog not available - PGN files will use default names")
 
 # Set window behavior before pygame init (removed problematic positioning)
 
@@ -40,6 +50,41 @@ try:
     font = pygame.font.SysFont('segoeui,arial,helvetica,sans-serif', font_size, bold=False)
 except:
     font = pygame.font.Font(None, font_size)
+
+# Helper functions for file operations
+def get_load_filename():
+    """Get filename for loading PGN file"""
+    if DIALOG_AVAILABLE:
+        # Hide main window temporarily
+        root = tk.Tk()
+        root.withdraw()
+        filename = filedialog.askopenfilename(
+            title="Load PGN File",
+            filetypes=[("PGN files", "*.pgn"), ("All files", "*.*")],
+            defaultextension=".pgn"
+        )
+        root.destroy()
+        return filename if filename else None
+    else:
+        # Fallback to default filename
+        return "game.pgn" if os.path.exists("game.pgn") else None
+
+def get_save_filename():
+    """Get filename for saving PGN file"""
+    if DIALOG_AVAILABLE:
+        # Hide main window temporarily
+        root = tk.Tk()
+        root.withdraw()
+        filename = filedialog.asksaveasfilename(
+            title="Save PGN File",
+            filetypes=[("PGN files", "*.pgn"), ("All files", "*.*")],
+            defaultextension=".pgn"
+        )
+        root.destroy()
+        return filename if filename else None
+    else:
+        # Fallback to default filename
+        return "game.pgn"
 
 # Game state
 selected_square_coords = None
@@ -122,6 +167,37 @@ while is_running:
                 last_hovered_square = None
                 last_hover_was_legal = False
                 needs_redraw = True
+            elif event.key == pygame.K_l and pygame.key.get_pressed()[pygame.K_LCTRL]:  # Ctrl+L to load PGN
+                filename = get_load_filename()
+                if filename:
+                    success = board_state.load_pgn_file(filename)
+                    if success:
+                        # Clear any current selection and highlights
+                        selected_square_coords = None
+                        highlighted_moves = []
+                        dragging_piece = None
+                        drag_origin = None
+                        last_hovered_square = None
+                        last_hover_was_legal = False
+                        display.invalidate_activity_cache()
+                        needs_redraw = True
+                        print(f"Loaded PGN file: {filename}")
+                    else:
+                        sound_manager.play_error_sound()
+                        print(f"Failed to load PGN file: {filename}")
+                else:
+                    sound_manager.play_error_sound()
+            elif event.key == pygame.K_s and pygame.key.get_pressed()[pygame.K_LCTRL]:  # Ctrl+S to save PGN
+                filename = get_save_filename()
+                if filename:
+                    success = board_state.save_pgn_file(filename)
+                    if success:
+                        print(f"Saved PGN file: {filename}")
+                    else:
+                        sound_manager.play_error_sound()
+                        print(f"Failed to save PGN file: {filename}")
+                else:
+                    sound_manager.play_error_sound()
         elif event.type == pygame.MOUSEBUTTONDOWN:
             mouse_pos = pygame.mouse.get_pos()
             

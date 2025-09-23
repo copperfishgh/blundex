@@ -1174,6 +1174,8 @@ class ChessDisplay:
             ("R", "Redo move"),
             ("H", "Toggle hanging pieces"),
             ("E", "Toggle exchange evaluation"),
+            ("Ctrl+L", "Load PGN file"),
+            ("Ctrl+S", "Save PGN file"),
             ("~", "Reset game"),
             ("/", "Show/hide this help"),
             ("Esc", "Exit game")
