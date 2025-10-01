@@ -217,9 +217,17 @@ class ChessDisplay:
         player_backward, player_isolated, player_doubled, player_passed = player_stats
         opponent_backward, opponent_isolated, opponent_doubled, opponent_passed = opponent_stats
 
+        # Get development statistics
+        white_development, black_development = board_state.get_development_scores()
+        if is_board_flipped:
+            player_development, opponent_development = black_development, white_development
+        else:
+            player_development, opponent_development = white_development, black_development
+
         # Table data: (name, player_value, opponent_value, higher_is_better)
         table_data = [
             ("Activity", player_activity, opponent_activity, True),
+            ("Development", player_development, opponent_development, True),
             ("Pawns", player_pawns, opponent_pawns, True),
             ("Backward", player_backward, opponent_backward, False),  # Lower is better
             ("Isolated", player_isolated, opponent_isolated, False),  # Lower is better
@@ -332,6 +340,8 @@ class ChessDisplay:
 
         if stat_type == "activity":
             return self._get_activity_squares(board_state, target_color)
+        elif stat_type == "development":
+            return self._get_developed_pieces(board_state, target_color)
         elif stat_type == "pawns":
             return self._get_pawn_pieces(board_state, target_color)
         elif stat_type == "backward":
@@ -365,6 +375,62 @@ class ChessDisplay:
         board_state.board.turn = original_turn
 
         return list(reachable_squares)
+
+    def _get_developed_pieces(self, board_state, color: bool):
+        """Get all developed pieces of this color"""
+        developed_pieces = []
+
+        if color == chess.WHITE:
+            starting_rank = 0  # rank 1
+            king_start = chess.E1
+        else:
+            starting_rank = 7  # rank 8
+            king_start = chess.E8
+
+        # Knights, bishops, queen: off back rank = developed
+        for piece_type in [chess.KNIGHT, chess.BISHOP, chess.QUEEN]:
+            for square in chess.SQUARES:
+                piece = board_state.board.piece_at(square)
+                if piece and piece.color == color and piece.piece_type == piece_type:
+                    if chess.square_rank(square) != starting_rank:
+                        developed_pieces.append(coords_from_square(square))
+
+        # King: developed if castled (not on starting square)
+        king_square = board_state.board.king(color)
+        if king_square != king_start:
+            developed_pieces.append(coords_from_square(king_square))
+
+        # Rooks: developed if moved OR if rooks are connected
+        rook_squares = []
+        for square in chess.SQUARES:
+            piece = board_state.board.piece_at(square)
+            if piece and piece.color == color and piece.piece_type == chess.ROOK:
+                rook_squares.append(square)
+
+        # Check if rooks are connected
+        rooks_connected = False
+        if len(rook_squares) == 2:
+            r1, r2 = rook_squares
+            if chess.square_rank(r1) == starting_rank and chess.square_rank(r2) == starting_rank:
+                file1, file2 = chess.square_file(r1), chess.square_file(r2)
+                min_file, max_file = min(file1, file2), max(file1, file2)
+                pieces_between = False
+                for file in range(min_file + 1, max_file):
+                    check_square = chess.square(file, starting_rank)
+                    if board_state.board.piece_at(check_square):
+                        pieces_between = True
+                        break
+                if not pieces_between:
+                    rooks_connected = True
+
+        # Add developed rooks to list
+        for rook_square in rook_squares:
+            if chess.square_rank(rook_square) != starting_rank:
+                developed_pieces.append(coords_from_square(rook_square))
+            elif rooks_connected:
+                developed_pieces.append(coords_from_square(rook_square))
+
+        return developed_pieces
 
     def _get_pawn_pieces(self, board_state, color: bool):
         """Get all pawn pieces of this color"""
@@ -729,30 +795,57 @@ class ChessDisplay:
                     if square in interesting_squares:
                         self.draw_exchange_indicator(screen, x, y)
 
-        # Draw exchange evaluation piece highlights (blue borders) if hovering
-        if mouse_pos:
+        # Draw exchange evaluation piece highlights (gray out non-highlighted) if hovering
+        # Only run if NOT hovering over statistics (to avoid conflict)
+        if mouse_pos and not self.hovered_statistic:
             evaluation_board = preview_board_state if preview_board_state else board_state
             highlight_positions = self.get_exchange_highlights(mouse_pos, evaluation_board, is_board_flipped)
 
-            for highlight_row, highlight_col in highlight_positions:
-                # Convert board coordinates to display coordinates
-                display_pos = self.get_square_display_position(highlight_row, highlight_col, is_board_flipped)
-                if display_pos:
-                    x, y = display_pos
-                    self.draw_piece_highlight(screen, x, y)
+            if highlight_positions:
+                # Convert to set for fast lookup
+                highlight_set = set(highlight_positions)
 
-        # Draw statistics highlighting if hovering over spreadsheet
+                # Draw gray overlay on ALL squares NOT in highlight set (both empty and occupied)
+                for row in range(8):
+                    for col in range(8):
+                        if (row, col) not in highlight_set:
+                            display_pos = self.get_square_display_position(row, col, is_board_flipped)
+                            if display_pos:
+                                x, y = display_pos
+                                self.draw_gray_overlay(screen, x, y)
+
+                # Draw thin white border around highlighted squares
+                for row, col in highlight_set:
+                    display_pos = self.get_square_display_position(row, col, is_board_flipped)
+                    if display_pos:
+                        x, y = display_pos
+                        pygame.draw.rect(screen, (255, 255, 255), (x, y, self.square_size, self.square_size), 2)
+
+        # Draw statistics highlighting if hovering over spreadsheet (gray out non-highlighted)
         if self.hovered_statistic:
             stat_type, player_side = self.hovered_statistic
             evaluation_board = preview_board_state if preview_board_state else board_state
             highlight_items = self.get_highlighted_pieces_for_statistic(evaluation_board, stat_type, player_side, is_board_flipped)
 
-            for highlight_row, highlight_col in highlight_items:
-                # Convert board coordinates to display coordinates
-                display_pos = self.get_square_display_position(highlight_row, highlight_col, is_board_flipped)
-                if display_pos:
-                    x, y = display_pos
-                    self.draw_piece_highlight(screen, x, y)
+            if highlight_items:
+                # Convert to set for fast lookup
+                highlight_set = set(highlight_items)
+
+                # Draw gray overlay on ALL squares NOT in highlight set (both empty and occupied)
+                for row in range(8):
+                    for col in range(8):
+                        if (row, col) not in highlight_set:
+                            display_pos = self.get_square_display_position(row, col, is_board_flipped)
+                            if display_pos:
+                                x, y = display_pos
+                                self.draw_gray_overlay(screen, x, y)
+
+                # Draw thin white border around highlighted squares
+                for row, col in highlight_set:
+                    display_pos = self.get_square_display_position(row, col, is_board_flipped)
+                    if display_pos:
+                        x, y = display_pos
+                        pygame.draw.rect(screen, (255, 255, 255), (x, y, self.square_size, self.square_size), 2)
 
         # Draw board border (use actual board size based on squares)
         actual_board_size = self.square_size * 8
@@ -1055,15 +1148,11 @@ class ChessDisplay:
         ]
         pygame.draw.polygon(screen, indicator_color, triangle_points)
 
-    def draw_piece_highlight(self, screen, x: int, y: int) -> None:
-        """Draw blue highlighting around a piece (for attacker/defender display)"""
-        # Draw a thick blue border around the piece
-        border_thickness = 4
-        highlight_color = (0, 100, 255)  # Blue color
-
-        # Draw border around the entire square
-        border_rect = pygame.Rect(x, y, self.square_size, self.square_size)
-        pygame.draw.rect(screen, highlight_color, border_rect, border_thickness)
+    def draw_gray_overlay(self, screen, x: int, y: int) -> None:
+        """Draw a semi-transparent gray overlay to dim non-highlighted squares"""
+        overlay = pygame.Surface((self.square_size, self.square_size), pygame.SRCALPHA)
+        overlay.fill((128, 128, 128, 153))  # Gray with 60% opacity
+        screen.blit(overlay, (x, y))
 
     def get_exchange_highlights(self, mouse_pos: Tuple[int, int], board_state, is_board_flipped: bool = False) -> List[Tuple[int, int]]:
         """
@@ -1099,8 +1188,11 @@ class ChessDisplay:
         attacker_coords = [coords_from_square(sq) for sq in attackers]
         defender_coords = [coords_from_square(sq) for sq in defenders]
 
+        # Include the hovered square itself (the attacked/defended piece)
+        hovered_coords = coords_from_square(chess_square)
+
         # Return all positions that should be highlighted
-        return attacker_coords + defender_coords
+        return attacker_coords + defender_coords + [hovered_coords]
 
     def get_square_display_position(self, row: int, col: int, is_board_flipped: bool = False) -> Optional[Tuple[int, int]]:
         """Get the display position (x, y) of a board square"""

@@ -220,6 +220,76 @@ class BoardState:
         black_activity = self.calculate_activity(chess.BLACK)
         return (white_activity, black_activity)
 
+    def count_developed_pieces(self, color: bool) -> int:
+        """Count how many pieces are developed (moved off back rank or connected rooks)"""
+        if color == chess.WHITE:
+            starting_rank = 0  # rank 1
+            king_start = chess.E1
+            queenside_rook_start = chess.A1
+            kingside_rook_start = chess.H1
+        else:
+            starting_rank = 7  # rank 8
+            king_start = chess.E8
+            queenside_rook_start = chess.A8
+            kingside_rook_start = chess.H8
+
+        developed_count = 0
+
+        # Check knights, bishops, and queen - simple: off back rank = developed
+        for piece_type in [chess.KNIGHT, chess.BISHOP, chess.QUEEN]:
+            for square in chess.SQUARES:
+                piece = self.board.piece_at(square)
+                if piece and piece.color == color and piece.piece_type == piece_type:
+                    if chess.square_rank(square) != starting_rank:
+                        developed_count += 1
+
+        # King: developed if castled (not on starting square)
+        king_square = self.board.king(color)
+        if king_square != king_start:
+            developed_count += 1
+
+        # Rooks: developed if moved OR if rooks are connected
+        rook_squares = []
+        for square in chess.SQUARES:
+            piece = self.board.piece_at(square)
+            if piece and piece.color == color and piece.piece_type == chess.ROOK:
+                rook_squares.append(square)
+
+        # Check if rooks are connected (can see each other on back rank)
+        rooks_connected = False
+        if len(rook_squares) == 2:
+            r1, r2 = rook_squares
+            # Both on starting rank?
+            if chess.square_rank(r1) == starting_rank and chess.square_rank(r2) == starting_rank:
+                # Check if they can see each other (no pieces between them)
+                file1, file2 = chess.square_file(r1), chess.square_file(r2)
+                min_file, max_file = min(file1, file2), max(file1, file2)
+                pieces_between = False
+                for file in range(min_file + 1, max_file):
+                    check_square = chess.square(file, starting_rank)
+                    if self.board.piece_at(check_square):
+                        pieces_between = True
+                        break
+                if not pieces_between:
+                    rooks_connected = True
+
+        # Count developed rooks
+        for rook_square in rook_squares:
+            if chess.square_rank(rook_square) != starting_rank:
+                # Rook moved off back rank
+                developed_count += 1
+            elif rooks_connected:
+                # Rook still on back rank but connected
+                developed_count += 1
+
+        return developed_count
+
+    def get_development_scores(self) -> Tuple[int, int]:
+        """Get development scores for both colors. Returns (white_dev, black_dev)"""
+        white_dev = self.count_developed_pieces(chess.WHITE)
+        black_dev = self.count_developed_pieces(chess.BLACK)
+        return (white_dev, black_dev)
+
     def count_pawns(self, color: bool) -> int:
         """Count the number of pawns for a given color"""
         count = 0
