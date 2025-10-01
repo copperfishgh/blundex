@@ -1,7 +1,8 @@
 import pygame
 import sys
 import os
-from chess_board import BoardState
+import chess
+from chess_board import BoardState, square_from_coords, coords_from_square
 from display import ChessDisplay
 from config import GameConfig, Colors
 from sound_manager import get_sound_manager
@@ -39,7 +40,7 @@ pygame.display.set_caption("Blundex")
 sound_manager = get_sound_manager()
 
 # Create global board state in starting position
-board_state = BoardState()
+game = BoardState()
 
 # Create display object
 display = ChessDisplay(WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -124,8 +125,8 @@ while is_running:
                 display.toggle_help_option("flip_board")
                 needs_redraw = True
             elif event.key == pygame.K_u:  # U key to undo
-                if board_state.can_undo():
-                    success = board_state.undo_move()
+                if game.can_undo():
+                    success = game.undo_move()
                     if success:
                         # Clear any current selection
                         selected_square_coords = None
@@ -136,8 +137,8 @@ while is_running:
                 else:
                     sound_manager.play_error_sound()
             elif event.key == pygame.K_r:  # R key to redo
-                if board_state.can_redo():
-                    success = board_state.redo_move()
+                if game.can_redo():
+                    success = game.redo_move()
                     if success:
                         # Clear any current selection
                         selected_square_coords = None
@@ -157,7 +158,7 @@ while is_running:
                 show_help_panel = not show_help_panel
                 needs_redraw = True
             elif event.key == pygame.K_BACKQUOTE:  # Tilde key (~) to reset game
-                board_state.reset_to_initial_position()
+                game.reset_to_initial_position()
                 # Clear any current selection and highlights
                 selected_square_coords = None
                 highlighted_moves = []
@@ -170,7 +171,7 @@ while is_running:
             elif event.key == pygame.K_l and pygame.key.get_pressed()[pygame.K_LCTRL]:  # Ctrl+L to load PGN
                 filename = get_load_filename()
                 if filename:
-                    success = board_state.load_pgn_file(filename)
+                    success = game.load_pgn_file(filename)
                     if success:
                         # Clear any current selection and highlights
                         selected_square_coords = None
@@ -190,7 +191,7 @@ while is_running:
             elif event.key == pygame.K_s and pygame.key.get_pressed()[pygame.K_LCTRL]:  # Ctrl+S to save PGN
                 filename = get_save_filename()
                 if filename:
-                    success = board_state.save_pgn_file(filename)
+                    success = game.save_pgn_file(filename)
                     if success:
                         print(f"Saved PGN file: {filename}")
                     else:
@@ -214,17 +215,21 @@ while is_running:
                     if display.is_help_option_enabled("flip_board"):
                         square = (7 - square[0], 7 - square[1])
 
+                    # Convert display coordinates to chess square
+                    chess_square = square_from_coords(square[0], square[1])
+
                     if selected_square_coords is None:
                         # Start dragging a piece
-                        piece = board_state.get_piece(square[0], square[1])
-                        if piece and piece.color == board_state.current_turn:
+                        piece = game.board.piece_at(chess_square)
+                        if piece and piece.color == game.board.turn:
                             # Set up drag state
                             dragging_piece = piece
                             drag_origin = square
                             selected_square_coords = square
 
                             # Calculate possible moves for the selected piece
-                            highlighted_moves = board_state.get_possible_moves(square[0], square[1])
+                            possible_squares = game.get_possible_moves(chess_square)
+                            highlighted_moves = [coords_from_square(sq) for sq in possible_squares]
                             # Reset hover state since highlighted_moves changed
                             last_hovered_square = None
                             last_hover_was_legal = False
@@ -232,25 +237,25 @@ while is_running:
                     else:
                             # Try to move the piece
                             if square in highlighted_moves:
+                                # Convert coordinates to chess squares
+                                from_square = square_from_coords(selected_square_coords[0], selected_square_coords[1])
+                                to_square = square_from_coords(square[0], square[1])
+
                                 # Check if this is a pawn promotion
-                                if board_state.is_pawn_promotion(selected_square_coords[0], selected_square_coords[1], square[0], square[1]):
+                                if game.is_pawn_promotion(from_square, to_square):
                                     # Show promotion dialog
-                                    current_piece = board_state.get_piece(selected_square_coords[0], selected_square_coords[1])
+                                    current_piece = game.board.piece_at(from_square)
                                     promotion_piece = display.show_promotion_dialog(screen, current_piece.color)
 
                                     # Execute the move with promotion
-                                    move_successful = board_state.make_move_with_promotion(
-                                        selected_square_coords[0], selected_square_coords[1],
-                                        square[0], square[1], promotion_piece
+                                    move_successful = game.make_move_with_promotion(
+                                        from_square, to_square, promotion_piece
                                     )
                                     if not move_successful:
                                         sound_manager.play_error_sound()
                                 else:
                                     # Execute regular move
-                                    move_successful = board_state.make_move(
-                                        selected_square_coords[0], selected_square_coords[1],
-                                        square[0], square[1]
-                                    )
+                                    move_successful = game.make_move(from_square, to_square)
                                     if not move_successful:
                                         sound_manager.play_error_sound()
 
@@ -272,10 +277,11 @@ while is_running:
                                 needs_redraw = True
                             else:
                                 # Select different piece
-                                piece = board_state.get_piece(square[0], square[1])
-                                if piece and piece.color == board_state.current_turn:
+                                piece = game.board.piece_at(chess_square)
+                                if piece and piece.color == game.board.turn:
                                     selected_square_coords = square
-                                    highlighted_moves = board_state.get_possible_moves(square[0], square[1])
+                                    possible_squares = game.get_possible_moves(chess_square)
+                                    highlighted_moves = [coords_from_square(sq) for sq in possible_squares]
                                     # Reset hover state since highlighted_moves changed
                                     last_hovered_square = None
                                     last_hover_was_legal = False
@@ -293,21 +299,21 @@ while is_running:
 
                     # Try to complete the move
                     if target_square in highlighted_moves:
+                        # Convert coordinates to chess squares
+                        from_square = square_from_coords(drag_origin[0], drag_origin[1])
+                        to_square = square_from_coords(target_square[0], target_square[1])
+
                         # Check if this is a pawn promotion
-                        if board_state.is_pawn_promotion(drag_origin[0], drag_origin[1], target_square[0], target_square[1]):
+                        if game.is_pawn_promotion(from_square, to_square):
                             # Show promotion dialog
                             promotion_piece = display.show_promotion_dialog(screen, dragging_piece.color)
                             # Execute the move with promotion
-                            move_successful = board_state.make_move_with_promotion(
-                                drag_origin[0], drag_origin[1],
-                                target_square[0], target_square[1], promotion_piece
+                            move_successful = game.make_move_with_promotion(
+                                from_square, to_square, promotion_piece
                             )
                         else:
                             # Execute regular move
-                            move_successful = board_state.make_move(
-                                drag_origin[0], drag_origin[1],
-                                target_square[0], target_square[1]
-                            )
+                            move_successful = game.make_move(from_square, to_square)
 
                 # Reset drag state regardless of whether move was successful
                 dragging_piece = None
@@ -331,15 +337,17 @@ while is_running:
     current_hover_is_legal = (current_hovered_square in highlighted_moves) if current_hovered_square else False
 
     # Create preview board state if hovering over a legal move
-    preview_board_state = None
+    preview_game = None
     if current_hover_is_legal and selected_square_coords:
         # Create a copy of the board state for preview
-        preview_board_state = board_state.copy()
+        preview_game = game.copy()
 
         # Execute the candidate move on the preview board
         from_row, from_col = selected_square_coords
         to_row, to_col = current_hovered_square
-        preview_board_state.make_move(from_row, from_col, to_row, to_col)
+        from_square = square_from_coords(from_row, from_col)
+        to_square = square_from_coords(to_row, to_col)
+        preview_game.make_move(from_square, to_square)
 
     # Update statistics hover detection
     previous_hovered_statistic = display.hovered_statistic
@@ -367,7 +375,7 @@ while is_running:
     if needs_redraw:
         # Draw the chess board (with flip consideration)
         current_mouse_pos = pygame.mouse.get_pos()
-        display.update_display(screen, board_state, selected_square_coords, highlighted_moves, display.is_help_option_enabled("flip_board"), preview_board_state, dragging_piece, drag_origin, current_mouse_pos)
+        display.update_display(screen, game, selected_square_coords, highlighted_moves, display.is_help_option_enabled("flip_board"), preview_game, dragging_piece, drag_origin, current_mouse_pos)
 
         # Draw dragged piece snapped to square center
         if dragging_piece:

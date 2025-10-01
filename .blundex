@@ -1,5 +1,5 @@
 {
-  "hanging_pieces": true,
+  "hanging_pieces": false,
   "exchange_evaluation": true,
-  "flip_board": false,
+  "flip_board": false
 }

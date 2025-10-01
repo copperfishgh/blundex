@@ -9,7 +9,8 @@ from typing import Optional, Tuple, List
 import pygame
 import json
 import os
-from chess_board import BoardState, Piece, Color, PieceType
+import chess
+from chess_board import BoardState, square_from_coords, coords_from_square
 from config import GameConfig, Colors, AnimationConfig, GameConstants
 
 class ChessDisplay:
@@ -99,17 +100,28 @@ class ChessDisplay:
         """Load and scale piece images from PNG files"""
         images = {}
 
-        for color in [Color.WHITE, Color.BLACK]:
-            for piece_type in PieceType:
+        # Map piece types to their string representations for filenames
+        piece_symbols = {
+            chess.PAWN: 'P',
+            chess.KNIGHT: 'N',
+            chess.BISHOP: 'B',
+            chess.ROOK: 'R',
+            chess.QUEEN: 'Q',
+            chess.KING: 'K'
+        }
+
+        for color in [chess.WHITE, chess.BLACK]:
+            for piece_type in [chess.PAWN, chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN, chess.KING]:
                 # Calculate piece size based on type (pawns smaller than other pieces)
-                if piece_type == PieceType.PAWN:
+                if piece_type == chess.PAWN:
                     piece_size = int(self.square_size * 0.65)
                 else:
                     piece_size = int(self.square_size * 0.75)
 
                 # Create filename based on naming convention: {color}{piece}.png
-                color_prefix = "w" if color == Color.WHITE else "b"
-                filename = f"pngs/2x/{color_prefix}{piece_type.value}.png"
+                color_prefix = "w" if color == chess.WHITE else "b"
+                piece_symbol = piece_symbols[piece_type]
+                filename = f"pngs/2x/{color_prefix}{piece_symbol}.png"
 
                 try:
                     # Load the original image
@@ -118,21 +130,23 @@ class ChessDisplay:
                     # Scale once using smooth scaling and cache it
                     scaled_image = pygame.transform.smoothscale(original_image, (piece_size, piece_size))
 
-                    # Store with the key format used elsewhere in the code
-                    key = f"{color.value}{piece_type.value}"
+                    # Store with the key format: "w1" for white pawn, "b6" for black king, etc.
+                    color_str = "w" if color == chess.WHITE else "b"
+                    key = f"{color_str}{piece_type}"
                     images[key] = scaled_image
 
                 except pygame.error as e:
                     print(f"Warning: Could not load {filename}: {e}")
                     # Create a fallback colored rectangle if image loading fails
                     surface = pygame.Surface((piece_size, piece_size))
-                    if color == Color.WHITE:
+                    if color == chess.WHITE:
                         surface.fill(self.RGB_WHITE)
                     else:
                         surface.fill(self.RGB_BLACK)
                     pygame.draw.rect(surface, Colors.PIECE_BORDER, surface.get_rect(), 2)
 
-                    key = f"{color.value}{piece_type.value}"
+                    color_str = "w" if color == chess.WHITE else "b"
+                    key = f"{color_str}{piece_type}"
                     images[key] = surface
 
         return images
@@ -308,11 +322,11 @@ class ChessDisplay:
 
         # Determine which color we're showing (player vs opponent)
         if is_board_flipped:
-            player_color = Color.BLACK
-            opponent_color = Color.WHITE
+            player_color = chess.BLACK
+            opponent_color = chess.WHITE
         else:
-            player_color = Color.WHITE
-            opponent_color = Color.BLACK
+            player_color = chess.WHITE
+            opponent_color = chess.BLACK
 
         target_color = player_color if player_side == "player" else opponent_color
 
@@ -331,103 +345,116 @@ class ChessDisplay:
 
         return []
 
-    def _get_activity_squares(self, board_state, color: Color):
-        """Get all squares that pieces of this color can reach"""
+    def _get_activity_squares(self, board_state, color: bool):
+        """Get all squares that pieces of this color can legally reach"""
         reachable_squares = set()
-        for row in range(8):
-            for col in range(8):
-                piece = board_state.get_piece(row, col)
-                if piece and piece.color == color and piece.type != PieceType.PAWN:
-                    moves = board_state._get_piece_pseudo_moves(row, col, piece)
-                    for move_row, move_col in moves:
-                        reachable_squares.add((move_row, move_col))
+
+        # Save current turn
+        original_turn = board_state.board.turn
+
+        # Set turn to the color we're checking
+        board_state.board.turn = color
+
+        # Only count squares that pieces can legally reach
+        for move in board_state.board.legal_moves:
+            piece = board_state.board.piece_at(move.from_square)
+            if piece and piece.color == color and piece.piece_type != chess.PAWN:
+                reachable_squares.add(coords_from_square(move.to_square))
+
+        # Restore original turn
+        board_state.board.turn = original_turn
+
         return list(reachable_squares)
 
-    def _get_pawn_pieces(self, board_state, color: Color):
+    def _get_pawn_pieces(self, board_state, color: bool):
         """Get all pawn pieces of this color"""
         pawn_pieces = []
-        for row in range(8):
-            for col in range(8):
-                piece = board_state.get_piece(row, col)
-                if piece and piece.color == color and piece.type == PieceType.PAWN:
-                    pawn_pieces.append((row, col))
+        for square in chess.SQUARES:
+            piece = board_state.board.piece_at(square)
+            if piece and piece.color == color and piece.piece_type == chess.PAWN:
+                pawn_pieces.append(coords_from_square(square))
         return pawn_pieces
 
-    def _get_backward_pawn_pieces(self, board_state, color: Color):
+    def _get_backward_pawn_pieces(self, board_state, color: bool):
         """Get backward pawn pieces of this color"""
         backward_pawns = []
-        enemy_color = Color.BLACK if color == Color.WHITE else Color.WHITE
+        enemy_color = not color
+        pawn_direction = 1 if color == chess.WHITE else -1
 
-        for row in range(8):
-            for col in range(8):
-                piece = board_state.get_piece(row, col)
-                if piece and piece.color == color and piece.type == PieceType.PAWN:
-                    # Check if this is a backward pawn (simplified version of the main logic)
-                    pawn_direction = -1 if color == Color.WHITE else 1
+        for square in chess.SQUARES:
+            piece = board_state.board.piece_at(square)
+            if piece and piece.color == color and piece.piece_type == chess.PAWN:
+                # Check if this is a backward pawn (simplified version of the main logic)
+                rank = chess.square_rank(square)
+                file = chess.square_file(square)
 
-                    # Check if pawn can be defended
-                    can_be_defended = False
-                    defend_row = row + pawn_direction
-                    if 0 <= defend_row < 8:
-                        for defend_col in [col - 1, col + 1]:
-                            if 0 <= defend_col < 8:
-                                defender = board_state.get_piece(defend_row, defend_col)
-                                if defender and defender.color == color and defender.type == PieceType.PAWN:
-                                    can_be_defended = True
+                # Check if pawn can be defended
+                can_be_defended = False
+                defend_rank = rank - pawn_direction
+                if 0 <= defend_rank < 8:
+                    for defend_file in [file - 1, file + 1]:
+                        if 0 <= defend_file < 8:
+                            defend_square = chess.square(defend_file, defend_rank)
+                            defender = board_state.board.piece_at(defend_square)
+                            if defender and defender.color == color and defender.piece_type == chess.PAWN:
+                                can_be_defended = True
+                                break
+
+                # Check if pawn can safely advance
+                can_safely_advance = True
+                advance_rank = rank + pawn_direction
+                if 0 <= advance_rank < 8:
+                    for enemy_file in [file - 1, file + 1]:
+                        if 0 <= enemy_file < 8:
+                            enemy_attack_rank = advance_rank + pawn_direction
+                            if 0 <= enemy_attack_rank < 8:
+                                enemy_square = chess.square(enemy_file, enemy_attack_rank)
+                                enemy_piece = board_state.board.piece_at(enemy_square)
+                                if enemy_piece and enemy_piece.color == enemy_color and enemy_piece.piece_type == chess.PAWN:
+                                    can_safely_advance = False
                                     break
 
-                    # Check if pawn can safely advance
-                    can_safely_advance = True
-                    advance_row = row + pawn_direction
-                    if 0 <= advance_row < 8:
-                        for enemy_col in [col - 1, col + 1]:
-                            if 0 <= enemy_col < 8:
-                                enemy_attack_row = advance_row + pawn_direction
-                                if 0 <= enemy_attack_row < 8:
-                                    enemy_piece = board_state.get_piece(enemy_attack_row, enemy_col)
-                                    if enemy_piece and enemy_piece.color == enemy_color and enemy_piece.type == PieceType.PAWN:
-                                        can_safely_advance = False
-                                        break
-
-                    if not can_be_defended and not can_safely_advance:
-                        backward_pawns.append((row, col))
+                if not can_be_defended and not can_safely_advance:
+                    backward_pawns.append(coords_from_square(square))
 
         return backward_pawns
 
-    def _get_isolated_pawn_pieces(self, board_state, color: Color):
+    def _get_isolated_pawn_pieces(self, board_state, color: bool):
         """Get isolated pawn pieces of this color"""
         isolated_pawns = []
-        for row in range(8):
-            for col in range(8):
-                piece = board_state.get_piece(row, col)
-                if piece and piece.color == color and piece.type == PieceType.PAWN:
-                    # Check if there are friendly pawns on adjacent files
-                    has_adjacent_pawn = False
-                    for adjacent_col in [col - 1, col + 1]:
-                        if 0 <= adjacent_col < 8:
-                            for check_row in range(8):
-                                adjacent_piece = board_state.get_piece(check_row, adjacent_col)
-                                if adjacent_piece and adjacent_piece.color == color and adjacent_piece.type == PieceType.PAWN:
-                                    has_adjacent_pawn = True
-                                    break
-                            if has_adjacent_pawn:
+        for square in chess.SQUARES:
+            piece = board_state.board.piece_at(square)
+            if piece and piece.color == color and piece.piece_type == chess.PAWN:
+                # Check if there are friendly pawns on adjacent files
+                file = chess.square_file(square)
+                has_adjacent_pawn = False
+                for adjacent_file in [file - 1, file + 1]:
+                    if 0 <= adjacent_file < 8:
+                        for check_rank in range(8):
+                            check_square = chess.square(adjacent_file, check_rank)
+                            adjacent_piece = board_state.board.piece_at(check_square)
+                            if adjacent_piece and adjacent_piece.color == color and adjacent_piece.piece_type == chess.PAWN:
+                                has_adjacent_pawn = True
                                 break
+                        if has_adjacent_pawn:
+                            break
 
-                    if not has_adjacent_pawn:
-                        isolated_pawns.append((row, col))
+                if not has_adjacent_pawn:
+                    isolated_pawns.append(coords_from_square(square))
 
         return isolated_pawns
 
-    def _get_doubled_pawn_pieces(self, board_state, color: Color):
+    def _get_doubled_pawn_pieces(self, board_state, color: bool):
         """Get doubled pawn pieces of this color"""
         doubled_pawns = []
         # Count pawns per file and identify doubled ones
-        for col in range(8):
+        for file in range(8):
             pawns_on_file = []
-            for row in range(8):
-                piece = board_state.get_piece(row, col)
-                if piece and piece.color == color and piece.type == PieceType.PAWN:
-                    pawns_on_file.append((row, col))
+            for rank in range(8):
+                square = chess.square(file, rank)
+                piece = board_state.board.piece_at(square)
+                if piece and piece.color == color and piece.piece_type == chess.PAWN:
+                    pawns_on_file.append(coords_from_square(square))
 
             # If more than one pawn on this file, all but the first are "doubled"
             if len(pawns_on_file) > 1:
@@ -435,47 +462,49 @@ class ChessDisplay:
 
         return doubled_pawns
 
-    def _get_passed_pawn_pieces(self, board_state, color: Color):
+    def _get_passed_pawn_pieces(self, board_state, color: bool):
         """Get passed pawn pieces of this color"""
         passed_pawns = []
-        enemy_color = Color.BLACK if color == Color.WHITE else Color.WHITE
+        enemy_color = not color
+        promotion_direction = 1 if color == chess.WHITE else -1
 
-        # Define the direction the pawn moves for promotion
-        if color == Color.WHITE:
-            promotion_direction = -1  # White pawns move toward row 0
-            start_row_check = 6       # Don't count pawns on the 7th rank (about to promote anyway)
+        # Define the start rank check
+        if color == chess.WHITE:
+            start_rank_check = 1  # Don't count pawns on rank 1 (about to promote)
         else:
-            promotion_direction = 1   # Black pawns move toward row 7
-            start_row_check = 1       # Don't count pawns on the 2nd rank
+            start_rank_check = 6  # Don't count pawns on rank 6 (about to promote)
 
         # Check each pawn
-        for row in range(8):
-            for col in range(8):
-                piece = board_state.get_piece(row, col)
-                if piece and piece.color == color and piece.type == PieceType.PAWN:
-                    # Skip pawns very close to promotion (they're obviously passed)
-                    if (color == Color.WHITE and row <= start_row_check) or (color == Color.BLACK and row >= start_row_check):
+        for square in chess.SQUARES:
+            piece = board_state.board.piece_at(square)
+            if piece and piece.color == color and piece.piece_type == chess.PAWN:
+                rank = chess.square_rank(square)
+                file = chess.square_file(square)
 
-                        # Check if this pawn is passed
-                        is_passed = True
+                # Skip pawns very close to promotion (they're obviously passed)
+                if (color == chess.WHITE and rank <= start_rank_check) or (color == chess.BLACK and rank >= start_rank_check):
 
-                        # Check the path to promotion on this file and adjacent files
-                        for check_col in [col - 1, col, col + 1]:
-                            if 0 <= check_col <= 7:  # Valid column
-                                # Check all squares from current position to promotion rank
-                                check_row = row + promotion_direction
-                                while 0 <= check_row <= 7:
-                                    enemy_piece = board_state.get_piece(check_row, check_col)
-                                    if enemy_piece and enemy_piece.color == enemy_color and enemy_piece.type == PieceType.PAWN:
-                                        is_passed = False
-                                        break
-                                    check_row += promotion_direction
+                    # Check if this pawn is passed
+                    is_passed = True
 
-                                if not is_passed:
+                    # Check the path to promotion on this file and adjacent files
+                    for check_file in [file - 1, file, file + 1]:
+                        if 0 <= check_file <= 7:  # Valid file
+                            # Check all squares from current position to promotion rank
+                            check_rank = rank + promotion_direction
+                            while 0 <= check_rank <= 7:
+                                check_square = chess.square(check_file, check_rank)
+                                enemy_piece = board_state.board.piece_at(check_square)
+                                if enemy_piece and enemy_piece.color == enemy_color and enemy_piece.piece_type == chess.PAWN:
+                                    is_passed = False
                                     break
+                                check_rank += promotion_direction
 
-                        if is_passed:
-                            passed_pawns.append((row, col))
+                            if not is_passed:
+                                break
+
+                    if is_passed:
+                        passed_pawns.append(coords_from_square(square))
 
         return passed_pawns
 
@@ -588,10 +617,10 @@ class ChessDisplay:
         self.checkmate_animation_start_time = time.time()
 
         # Find the checkmated king position
-        losing_color = board_state.current_turn
-        self.checkmate_king_position = board_state.get_king_position(losing_color)
+        losing_color = board_state.board.turn
+        self.checkmate_king_position = board_state.board.king(losing_color)
 
-    def draw_rotating_king(self, screen, piece: Piece, x: int, y: int, elapsed_time: float) -> None:
+    def draw_rotating_king(self, screen, piece: chess.Piece, x: int, y: int, elapsed_time: float) -> None:
         """Draw a king rotating on its head"""
         # Animation duration is 0.5 seconds for 360 degree rotation
         animation_duration = 0.5
@@ -605,7 +634,8 @@ class ChessDisplay:
             angle = progress * 180
 
         # Get the original piece image
-        key = f"{piece.color.value}{piece.type.value}"
+        color_str = "w" if piece.color == chess.WHITE else "b"
+        key = f"{color_str}{piece.piece_type}"
         if key in self.piece_images:
             original_surface = self.piece_images[key]
 
@@ -621,7 +651,7 @@ class ChessDisplay:
             screen.blit(rotated_surface, rotated_rect)
         else:
             # Fallback to text
-            piece_text = str(piece)
+            piece_text = chess.piece_symbol(piece.piece_type).upper() if piece.color == chess.WHITE else chess.piece_symbol(piece.piece_type)
             text_surface = self.font_large.render(piece_text, True, self.RGB_BLACK)
             text_rect = text_surface.get_rect(center=(x + self.square_size//2, y + self.square_size//2))
             screen.blit(text_surface, text_rect)
@@ -633,7 +663,7 @@ class ChessDisplay:
         """Draw the chess board with pieces"""
         if highlighted_moves is None:
             highlighted_moves = []
-        
+
         # Draw the board squares
         for row in range(8):
             for col in range(8):
@@ -642,15 +672,16 @@ class ChessDisplay:
                 display_col = (7 - col) if is_board_flipped else col
                 x = self.board_margin_x + display_col * self.square_size
                 y = self.board_margin_y + display_row * self.square_size
-                
+
                 # Determine square color (use original coordinates for coloring)
                 is_light = (row + col) % 2 == 0
                 color = self.LIGHT_SQUARE if is_light else self.DARK_SQUARE
 
                 # Apply last move highlighting (lichess-style green overlay)
                 if board_state.last_move:
-                    from_square, to_square = board_state.last_move
-                    if (row, col) == from_square or (row, col) == to_square:
+                    from_coords = coords_from_square(board_state.last_move.from_square)
+                    to_coords = coords_from_square(board_state.last_move.to_square)
+                    if (row, col) == from_coords or (row, col) == to_coords:
                         color = Colors.LIGHT_SQUARE_LAST_MOVE if is_light else Colors.DARK_SQUARE_LAST_MOVE
 
                 # Highlight selected square only
@@ -662,7 +693,8 @@ class ChessDisplay:
                                (x, y, self.square_size, self.square_size))
 
                 # Draw piece if present (skip if being dragged)
-                piece = board_state.get_piece(row, col)
+                square = square_from_coords(row, col)
+                piece = board_state.board.piece_at(square)
                 if piece and not (dragging_piece and drag_origin and (row, col) == drag_origin):
                     self.draw_piece(screen, piece, x, y, row, col)
 
@@ -676,14 +708,14 @@ class ChessDisplay:
                     evaluation_board = preview_board_state if preview_board_state else board_state
 
                     # Get the piece that would be at this position in the evaluation board
-                    evaluation_piece = evaluation_board.get_piece(row, col)
+                    evaluation_piece = evaluation_board.board.piece_at(square)
 
                     if evaluation_piece:
                         hanging_pieces = evaluation_board.get_hanging_pieces(evaluation_piece.color)
-                        if (row, col) in hanging_pieces:
+                        if square in hanging_pieces:
                             # Determine player color based on board orientation
                             # Player = pieces on bottom (white when not flipped, black when flipped)
-                            player_color = Color.BLACK if is_board_flipped else Color.WHITE
+                            player_color = chess.BLACK if is_board_flipped else chess.WHITE
                             is_player_piece = (evaluation_piece.color == player_color)
                             self.draw_hanging_piece_indicator(screen, x, y, is_player_piece)
 
@@ -694,7 +726,7 @@ class ChessDisplay:
 
                     # Get list of tactically interesting squares
                     interesting_squares = evaluation_board.get_tactically_interesting_squares()
-                    if (row, col) in interesting_squares:
+                    if square in interesting_squares:
                         self.draw_exchange_indicator(screen, x, y)
 
         # Draw exchange evaluation piece highlights (blue borders) if hovering
@@ -756,21 +788,24 @@ class ChessDisplay:
                 piece_y = mouse_pos[1] - self.square_size // 2
                 self.draw_piece(screen, piece, piece_x, piece_y, -1, -1)
     
-    def draw_piece(self, screen, piece: Piece, x: int, y: int, board_row: int = -1, board_col: int = -1) -> None:
+    def draw_piece(self, screen, piece: chess.Piece, x: int, y: int, board_row: int = -1, board_col: int = -1) -> None:
         """Draw a piece at the specified screen coordinates"""
         # Check if this is the checkmated king and animation is active
         if (self.checkmate_animation_start_time is not None and
             self.checkmate_king_position is not None and
-            piece.type == PieceType.KING and
-            (board_row, board_col) == self.checkmate_king_position):
-
-            import time
-            elapsed_time = time.time() - self.checkmate_animation_start_time
-            self.draw_rotating_king(screen, piece, x, y, elapsed_time)
-            return
+            piece.piece_type == chess.KING):
+            # Check if this is the checkmated king's position
+            if board_row != -1 and board_col != -1:
+                king_coords = coords_from_square(self.checkmate_king_position)
+                if (board_row, board_col) == king_coords:
+                    import time
+                    elapsed_time = time.time() - self.checkmate_animation_start_time
+                    self.draw_rotating_king(screen, piece, x, y, elapsed_time)
+                    return
 
         # Normal piece drawing
-        key = f"{piece.color.value}{piece.type.value}"
+        color_str = "w" if piece.color == chess.WHITE else "b"
+        key = f"{color_str}{piece.piece_type}"
         if key in self.piece_images:
             piece_surface = self.piece_images[key]
             # Center the piece in the square
@@ -779,7 +814,7 @@ class ChessDisplay:
             screen.blit(piece_surface, (piece_x, piece_y))
         else:
             # Fallback: draw piece as text
-            piece_text = str(piece)
+            piece_text = chess.piece_symbol(piece.piece_type).upper() if piece.color == chess.WHITE else chess.piece_symbol(piece.piece_type)
             text_surface = self.font_large.render(piece_text, True, self.RGB_BLACK)
             text_rect = text_surface.get_rect(center=(x + self.square_size//2, y + self.square_size//2))
             screen.blit(text_surface, text_rect)
@@ -1045,20 +1080,27 @@ class ChessDisplay:
 
         # Convert display coordinates to board coordinates if flipped
         if is_board_flipped:
-            board_square = (7 - hovered_square[0], 7 - hovered_square[1])
+            board_square_coords = (7 - hovered_square[0], 7 - hovered_square[1])
         else:
-            board_square = hovered_square
+            board_square_coords = hovered_square
+
+        # Convert to chess.Square
+        chess_square = square_from_coords(board_square_coords[0], board_square_coords[1])
 
         # Check if this square is tactically interesting
         interesting_squares = board_state.get_tactically_interesting_squares()
-        if board_square not in interesting_squares:
+        if chess_square not in interesting_squares:
             return []
 
         # Get all attackers and defenders for this square
-        attackers, defenders = board_state.get_all_attackers_and_defenders(board_square[0], board_square[1])
+        attackers, defenders = board_state.get_all_attackers_and_defenders(chess_square)
+
+        # Convert chess.Square back to (row, col) coordinates
+        attacker_coords = [coords_from_square(sq) for sq in attackers]
+        defender_coords = [coords_from_square(sq) for sq in defenders]
 
         # Return all positions that should be highlighted
-        return attackers + defenders
+        return attacker_coords + defender_coords
 
     def get_square_display_position(self, row: int, col: int, is_board_flipped: bool = False) -> Optional[Tuple[int, int]]:
         """Get the display position (x, y) of a board square"""
@@ -1259,10 +1301,10 @@ class ChessDisplay:
         instruction_rect = instruction_surface.get_rect(center=(panel_x + panel_width // 2, panel_y + panel_height - padding - instruction_height // 2))
         screen.blit(instruction_surface, instruction_rect)
 
-    def show_promotion_dialog(self, screen, color: Color) -> PieceType:
+    def show_promotion_dialog(self, screen, color: bool) -> int:
         """Show promotion dialog and return selected piece type"""
         # Define promotion pieces (Queen, Rook, Bishop, Knight)
-        promotion_pieces = [PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT]
+        promotion_pieces = [chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT]
 
         # Dialog dimensions
         dialog_width = 400
@@ -1302,7 +1344,8 @@ class ChessDisplay:
             pygame.draw.rect(screen, self.RGB_BLACK, piece_rect, 2)
 
             # Draw piece image or text
-            key = f"{color.value}{piece_type.value}"
+            color_str = "w" if color == chess.WHITE else "b"
+            key = f"{color_str}{piece_type}"
             if key in self.piece_images:
                 # Scale the piece image to fit
                 piece_surface = pygame.transform.smoothscale(self.piece_images[key], (piece_size - 10, piece_size - 10))
@@ -1311,7 +1354,7 @@ class ChessDisplay:
                 screen.blit(piece_surface, (piece_x_centered, piece_y_centered))
             else:
                 # Fallback to text
-                piece_text = piece_type.value
+                piece_text = chess.piece_symbol(piece_type).upper() if color == chess.WHITE else chess.piece_symbol(piece_type)
                 text_surface = self.font_large.render(piece_text, True, self.RGB_BLACK)
                 text_rect = text_surface.get_rect(center=piece_rect.center)
                 screen.blit(text_surface, text_rect)
@@ -1329,15 +1372,15 @@ class ChessDisplay:
                 elif event.type == pygame.KEYDOWN:
                     # Keyboard shortcuts
                     if event.key == pygame.K_q:
-                        return PieceType.QUEEN
+                        return chess.QUEEN
                     elif event.key == pygame.K_r:
-                        return PieceType.ROOK
+                        return chess.ROOK
                     elif event.key == pygame.K_b:
-                        return PieceType.BISHOP
+                        return chess.BISHOP
                     elif event.key == pygame.K_n:
-                        return PieceType.KNIGHT
+                        return chess.KNIGHT
                     elif event.key == pygame.K_ESCAPE:
-                        return PieceType.QUEEN  # Default to queen
+                        return chess.QUEEN  # Default to queen
 
     def _load_settings(self) -> None:
         """Load checkbox states from settings file"""

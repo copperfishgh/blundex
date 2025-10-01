@@ -123,11 +123,12 @@ class GameConstants:
     PIECE_SIZE_FACTOR = 0.75    # Other pieces are 75% of square size
 
     # Standard chess piece values for material evaluation
+    # Uses python-chess piece type constants (integers 1-6)
     PIECE_VALUES = {
-        'P': 1,    # Pawn
-        'N': 3,    # Knight
-        'B': 3,    # Bishop
-        'R': 5,    # Rook
-        'Q': 9,    # Queen
-        'K': 0     # King (invaluable/special case)
+        1: 1,    # PAWN
+        2: 3,    # KNIGHT
+        3: 3,    # BISHOP
+        4: 5,    # ROOK
+        5: 9,    # QUEEN
+        6: 0     # KING (invaluable/special case)
     }
