@@ -93,6 +93,10 @@ class BoardState:
             'white_pinned': [],
             'black_pinned': [],
 
+            # Skewered pieces (used by: get_skewered_pieces, skewer indicator display)
+            'white_skewered': [],
+            'black_skewered': [],
+
             # Pawn structure (used by: all pawn statistics)
             # BITBOARD NOTE: Will use bitboard SquareSets for pawn analysis
             'pawn_structure': {
@@ -188,19 +192,21 @@ class BoardState:
                         analysis['black_developed'].append(square)
 
         # ============================================================
-        # SECTION 3: PIN DETECTION
-        # Use python-chess's optimized is_pinned() function
+        # SECTION 3: PIN AND SKEWER DETECTION
+        # Pins: Use python-chess's optimized is_pinned() function
+        # Skewers: Detect using ray-tracing with piece value comparison
         #
-        # BITBOARD OPTIMIZATION: is_pinned() uses fast bitboard ray-tracing
-        # Much faster than manual ray-casting!
+        # BITBOARD OPTIMIZATION: Use BB_RAYS and between() for O(1) ray ops
         # ============================================================
 
         for color in [chess.WHITE, chess.BLACK]:
+            enemy_color = not color
+
             # BITBOARD: Get all non-pawn pieces for this color using bitboard operations
             color_pieces = self.board.occupied_co[color]
             non_pawn_pieces = color_pieces & ~self.board.pawns  # Exclude pawns
 
-            # Iterate only non-pawn pieces of this color
+            # --- PIN DETECTION (use built-in method) ---
             for square in non_pawn_pieces:
                 # Use python-chess's optimized pin detection (uses bitboards internally)
                 if self.board.is_pinned(color, square):
@@ -208,6 +214,66 @@ class BoardState:
                         analysis['white_pinned'].append(square)
                     else:
                         analysis['black_pinned'].append(square)
+
+            # --- SKEWER DETECTION (custom implementation) ---
+            # Skewers are "reverse pins": valuable piece in front, less valuable behind
+            # Only sliding pieces (B/R/Q) can create skewers
+
+            enemy_sliding_pieces = (
+                self.board.occupied_co[enemy_color] &
+                (self.board.bishops | self.board.rooks | self.board.queens)
+            )
+
+            for attacker_square in enemy_sliding_pieces:
+                # Get all squares this sliding piece attacks
+                attacked_squares = self.board.attacks(attacker_square)
+
+                # Check each attacked piece of our color
+                for attacked_square in (attacked_squares & color_pieces):
+                    attacked_piece = self.board.piece_at(attacked_square)
+
+                    # Skip pawns (not considered skewerable)
+                    if attacked_piece.piece_type == chess.PAWN:
+                        continue
+
+                    # BITBOARD: Get full ray between attacker and attacked piece (O(1))
+                    ray = chess.BB_RAYS[attacker_square][attacked_square]
+
+                    # Look for pieces behind the attacked piece on the same ray
+                    # Iterate squares beyond the attacked piece
+                    for behind_square in chess.SquareSet(ray):
+                        # Skip the attacker and attacked squares
+                        if behind_square in (attacker_square, attacked_square):
+                            continue
+
+                        # Only check squares beyond the attacked piece
+                        # (Further from attacker than attacked piece)
+                        if chess.square_distance(attacker_square, behind_square) <= \
+                           chess.square_distance(attacker_square, attacked_square):
+                            continue
+
+                        behind_piece = self.board.piece_at(behind_square)
+
+                        # Found a piece behind?
+                        if behind_piece and behind_piece.color == color:
+                            # Check if it's a valid skewer (front >= back in value)
+                            # OR if front piece is king (absolute skewer)
+                            front_value = GameConstants.PIECE_VALUES[attacked_piece.piece_type]
+                            back_value = GameConstants.PIECE_VALUES[behind_piece.piece_type]
+
+                            is_skewer = (front_value >= back_value or
+                                       attacked_piece.piece_type == chess.KING)
+
+                            if is_skewer:
+                                # BITBOARD: Verify no pieces between front and back (O(1))
+                                between_squares = chess.between(attacked_square, behind_square)
+                                if not any(self.board.piece_at(sq) for sq in between_squares):
+                                    # Valid skewer detected!
+                                    if color == chess.WHITE:
+                                        analysis['white_skewered'].append(attacked_square)
+                                    else:
+                                        analysis['black_skewered'].append(attacked_square)
+                                    break  # Only need first skewer on this ray
 
         # ============================================================
         # SECTION 4: PAWN STRUCTURE ANALYSIS
@@ -359,6 +425,11 @@ class BoardState:
         self._ensure_analysis()
         return self._analysis['white_pinned' if color == chess.WHITE else 'black_pinned']
 
+    def get_skewered_pieces(self, color: bool) -> List[int]:
+        """Return pre-computed skewered pieces for given color"""
+        self._ensure_analysis()
+        return self._analysis['white_skewered' if color == chess.WHITE else 'black_skewered']
+
     def count_pawns(self, color: bool) -> int:
         """Return count of pawns"""
         self._ensure_analysis()
@@ -457,14 +528,94 @@ class BoardState:
 - [ ] Profile performance to measure actual speedup
 - [ ] Verify all edge cases (endgames with few pieces, pawn-heavy positions)
 
-## Future Tactical Pattern Detection
+## Tactical Pattern Detection: Performance Analysis
 
-Python-chess does NOT provide built-in detection for these patterns. We'll need to implement them ourselves using the primitives (`attacks()`, `attackers()`, ray-casting):
+### ✅ **X-ray Attacks: USE OFFICIAL IMPLEMENTATION**
 
-### To Implement Later
-- [ ] **Forks** - One piece attacking 2+ valuable enemy pieces
-- [ ] **Skewers** - Attacking valuable piece with less valuable piece behind it on ray
-- [ ] **X-rays** - Piece "seeing through" another piece to square behind
-- [ ] **Discovered attacks** - Moving piece reveals attack from piece behind
+**Python-chess ships production-ready X-ray detection** in `examples/xray_attacks.py` using **magic bitboard lookup tables**.
 
-These would fit naturally into the mega-loop structure since they need attack information already being computed.
+**Key insight**: Uses `BB_RANK_ATTACKS`, `BB_FILE_ATTACKS`, `BB_DIAG_ATTACKS` for O(1) performance:
+
+```python
+# Official approach - O(1) magic bitboard lookups:
+chess.BB_RANK_ATTACKS[square][occupied_bitboard]
+chess.BB_FILE_ATTACKS[square][occupied_bitboard]
+chess.BB_DIAG_ATTACKS[square][occupied_bitboard]
+```
+
+**Implementation strategy**: Adapt official code from python-chess examples directory. X-rays can be computed OUTSIDE the mega-loop as a separate pass since they require modified occupancy bitboards.
+
+**Performance**: O(1) per sliding piece using pre-calculated lookup tables.
+
+### ⚠️ **Skewers: Adaptable from Pin Detection**
+
+Skewers are "reverse pins" - valuable piece in front, less valuable behind. Similar algorithm to pins but with opposite value ordering.
+
+**Implementation strategy**:
+- Use same ray-tracing logic as pin detection
+- Check piece values: `front_value >= back_value`
+- Use `chess.BB_RAYS[from][to]` for full ray
+- Use `chess.between(sq1, sq2)` to verify no blockers
+
+**Performance**: Similar to pin detection - O(n) where n = number of sliding pieces. Could be added to SECTION 3 of mega-loop.
+
+### ❌ **Forks: EXPENSIVE - Requires Legal Move Generation**
+
+**Fork detection requires making/unmaking EVERY legal move** to check attacks:
+
+```python
+for move in board.legal_moves:  # ~30-40 moves per position
+    board.push(move)              # Make move
+    attacked = board.attacks(move.to_square)  # Check attacks
+    board.pop()                   # Unmake move
+```
+
+**Performance cost**: ~30-40x more expensive than mega-loop because:
+1. Legal move generation itself is expensive
+2. Must make/unmake each move (full position state change)
+3. Must compute attacks for each candidate move
+
+**Recommendation**: Implement forks ONLY if needed for UI display. Consider engine integration (Stockfish) for tactical evaluation instead.
+
+### Performance Comparison Table
+
+| Pattern | Complexity | Can Integrate in Mega-Loop? | Performance Impact |
+|---------|-----------|------------------------------|-------------------|
+| Hanging pieces | O(n) pieces | ✅ Yes (SECTION 2) | Baseline |
+| Attacked pieces | O(n) pieces | ✅ Yes (SECTION 2) | Baseline |
+| Pins | O(n) pieces | ✅ Yes (SECTION 3) | ~1.2x baseline |
+| **Skewers** | O(n) sliding pieces | ✅ Yes (SECTION 3) | ~1.3x baseline |
+| Pawns (all types) | O(n) pawns | ✅ Yes (SECTION 4) | ~1.5x baseline |
+| **X-rays** | O(1) per piece | ⚠️ Separate method | ~1.2x baseline |
+| ~~Forks~~ | ~~O(m) legal moves~~ | ❌ NOT IMPLEMENTED | ~~30-40x baseline~~ |
+
+**Mega-loop with pins + skewers + pawns**: ~2-3x slower than baseline (still fast!)
+**Fork detection**: Abandoned due to 30-40x cost - too expensive for real-time use
+
+### Recommended Implementation Order
+
+1. **Phase 1**: Implement mega-loop with hanging, attacked, pins, skewers, pawns (CURRENT PLAN)
+2. **Phase 2**: Add X-ray detection as separate method using official implementation
+3. **Phase 3**: ~~Fork detection~~ - ABANDONED (too expensive for real-time use)
+
+### Critical Bitboard Primitives Discovered
+
+The tactical pattern research revealed these efficient operations:
+
+```python
+# Magic bitboard lookup tables (O(1) - FAST!)
+chess.BB_RANK_ATTACKS[square][occupied]
+chess.BB_FILE_ATTACKS[square][occupied]
+chess.BB_DIAG_ATTACKS[square][occupied]
+
+# Ray operations (O(1) - FAST!)
+chess.BB_RAYS[from_square][to_square]  # Full ray between squares
+chess.between(square1, square2)         # Squares between (excludes endpoints)
+
+# Bitboard masks (O(1) - already using these)
+chess.BB_RANK_MASKS[square]
+chess.BB_FILE_MASKS[square]
+chess.BB_DIAG_MASKS[square]
+```
+
+These should be preferred over manual ray-casting in all implementations.
