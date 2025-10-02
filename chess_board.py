@@ -14,6 +14,7 @@ Uses python-chess types directly:
 from typing import Optional, List, Tuple
 import copy
 import chess
+from config import GameConstants
 
 
 class BoardState:
@@ -318,6 +319,76 @@ class BoardState:
         white_hanging = self.count_hanging_pieces(chess.WHITE)
         black_hanging = self.count_hanging_pieces(chess.BLACK)
         return (white_hanging, black_hanging)
+
+    def get_pinned_pieces(self, color: bool) -> List[int]:
+        """
+        Find all pinned pieces for the given color (both absolute and relative pins).
+
+        Absolute pin: piece pinned to the king (moving it would expose king to check)
+        Relative pin: piece pinned to a valuable piece (moving it would lose material)
+        """
+        pinned_pieces = []
+        king_square = self.board.king(color)
+
+        if king_square is None:
+            return pinned_pieces
+
+        # Check all friendly pieces for both absolute and relative pins
+        for square in chess.SQUARES:
+            piece = self.board.piece_at(square)
+            if piece and piece.color == color and square != king_square and piece.piece_type != chess.PAWN:
+                # Check for absolute pin (pinned to king)
+                if self.board.is_pinned(color, square):
+                    pinned_pieces.append(square)
+                    continue
+
+                # Check for relative pin (pinned to valuable piece)
+                # Look for sliding pieces (bishop, rook, queen) attacking this square
+                enemy_color = not color
+                attackers = self.board.attackers(enemy_color, square)
+
+                for attacker_square in attackers:
+                    attacker = self.board.piece_at(attacker_square)
+                    # Only sliding pieces can create pins
+                    if attacker and attacker.piece_type in [chess.BISHOP, chess.ROOK, chess.QUEEN]:
+                        # Check if there's a more valuable piece behind this one on the same line
+                        # Get the direction from attacker to this piece
+                        file_diff = chess.square_file(square) - chess.square_file(attacker_square)
+                        rank_diff = chess.square_rank(square) - chess.square_rank(attacker_square)
+
+                        # Normalize to direction (-1, 0, or 1)
+                        if file_diff != 0:
+                            file_dir = file_diff // abs(file_diff)
+                        else:
+                            file_dir = 0
+                        if rank_diff != 0:
+                            rank_dir = rank_diff // abs(rank_diff)
+                        else:
+                            rank_dir = 0
+
+                        # Continue in the same direction to see if there's a friendly piece behind
+                        current_file = chess.square_file(square) + file_dir
+                        current_rank = chess.square_rank(square) + rank_dir
+
+                        while 0 <= current_file < 8 and 0 <= current_rank < 8:
+                            behind_square = chess.square(current_file, current_rank)
+                            behind_piece = self.board.piece_at(behind_square)
+
+                            if behind_piece:
+                                # Found a piece behind - check if it's friendly and more valuable
+                                if behind_piece.color == color:
+                                    piece_value = GameConstants.PIECE_VALUES.get(piece.piece_type, 0)
+                                    behind_value = GameConstants.PIECE_VALUES.get(behind_piece.piece_type, 0)
+
+                                    # This is a pin if the piece behind is more valuable (or equal value like queen)
+                                    if behind_value > piece_value or (behind_piece.piece_type == chess.QUEEN):
+                                        pinned_pieces.append(square)
+                                break  # Stop searching in this direction
+
+                            current_file += file_dir
+                            current_rank += rank_dir
+
+        return pinned_pieces
 
     def count_pawns(self, color: bool) -> int:
         """Count the number of pawns for a given color"""

@@ -577,12 +577,6 @@ class ChessDisplay:
         enemy_color = not color
         promotion_direction = 1 if color == chess.WHITE else -1
 
-        # Define the start rank check
-        if color == chess.WHITE:
-            start_rank_check = 1  # Don't count pawns on rank 1 (about to promote)
-        else:
-            start_rank_check = 6  # Don't count pawns on rank 6 (about to promote)
-
         # Check each pawn
         for square in chess.SQUARES:
             piece = board_state.board.piece_at(square)
@@ -590,30 +584,27 @@ class ChessDisplay:
                 rank = chess.square_rank(square)
                 file = chess.square_file(square)
 
-                # Skip pawns very close to promotion (they're obviously passed)
-                if (color == chess.WHITE and rank <= start_rank_check) or (color == chess.BLACK and rank >= start_rank_check):
+                # Check if this pawn is passed
+                is_passed = True
 
-                    # Check if this pawn is passed
-                    is_passed = True
-
-                    # Check the path to promotion on this file and adjacent files
-                    for check_file in [file - 1, file, file + 1]:
-                        if 0 <= check_file <= 7:  # Valid file
-                            # Check all squares from current position to promotion rank
-                            check_rank = rank + promotion_direction
-                            while 0 <= check_rank <= 7:
-                                check_square = chess.square(check_file, check_rank)
-                                enemy_piece = board_state.board.piece_at(check_square)
-                                if enemy_piece and enemy_piece.color == enemy_color and enemy_piece.piece_type == chess.PAWN:
-                                    is_passed = False
-                                    break
-                                check_rank += promotion_direction
-
-                            if not is_passed:
+                # Check the path to promotion on this file and adjacent files
+                for check_file in [file - 1, file, file + 1]:
+                    if 0 <= check_file <= 7:  # Valid file
+                        # Check all squares from current position to promotion rank
+                        check_rank = rank + promotion_direction
+                        while 0 <= check_rank <= 7:
+                            check_square = chess.square(check_file, check_rank)
+                            enemy_piece = board_state.board.piece_at(check_square)
+                            if enemy_piece and enemy_piece.color == enemy_color and enemy_piece.piece_type == chess.PAWN:
+                                is_passed = False
                                 break
+                            check_rank += promotion_direction
 
-                    if is_passed:
-                        passed_pawns.append(coords_from_square(square))
+                        if not is_passed:
+                            break
+
+                if is_passed:
+                    passed_pawns.append(coords_from_square(square))
 
         return passed_pawns
 
@@ -839,6 +830,15 @@ class ChessDisplay:
                 piece = board_state.board.piece_at(square)
                 if piece and not (dragging_piece and drag_origin and (row, col) == drag_origin):
                     self.draw_piece(screen, piece, x, y, row, col)
+
+                # Draw pin indicator AFTER piece (so it appears on top)
+                if piece:
+                    white_pinned = set(evaluation_board.get_pinned_pieces(chess.WHITE))
+                    black_pinned = set(evaluation_board.get_pinned_pieces(chess.BLACK))
+                    all_pinned = white_pinned | black_pinned
+
+                    if square in all_pinned:
+                        self.draw_pin_indicator(screen, x, y)
 
                 # Draw move indicator circle for possible moves
                 if (row, col) in highlighted_moves:
@@ -1241,6 +1241,33 @@ class ChessDisplay:
 
         # Blit the cached gradient
         screen.blit(self.attacked_glow_surface, (x, y))
+
+    def draw_pin_indicator(self, screen, x: int, y: int) -> None:
+        """Draw a red pushpin symbol in the upper left corner of the square"""
+        corner_size = int(self.square_size * 0.2)  # 20% of square size
+
+        # Draw pushpin using pygame primitives
+        # Pushpin consists of a circle (pin head) and a triangle (pin point)
+        pin_color = Colors.ANNOTATION_WARNING  # Red
+
+        # Pin head (small circle)
+        head_radius = corner_size // 3
+        head_center_x = x + corner_size // 2
+        head_center_y = y + corner_size // 3
+        pygame.draw.circle(screen, pin_color, (head_center_x, head_center_y), head_radius)
+
+        # Pin point (small triangle pointing down)
+        point_top_y = head_center_y + head_radius
+        point_bottom_y = y + corner_size
+        point_left_x = head_center_x - head_radius // 2
+        point_right_x = head_center_x + head_radius // 2
+
+        triangle_points = [
+            (head_center_x, point_bottom_y),  # Bottom point
+            (point_left_x, point_top_y),       # Top left
+            (point_right_x, point_top_y)       # Top right
+        ]
+        pygame.draw.polygon(screen, pin_color, triangle_points)
 
     def draw_gray_overlay(self, screen, x: int, y: int) -> None:
         """Draw a semi-transparent gray overlay to dim non-highlighted squares"""
