@@ -73,7 +73,6 @@ class ChessDisplay:
         # Help options - load from settings file if available
         self.settings_file = ".blundex"
         self.help_options = [
-            {"name": "Hanging Pieces", "key": "hanging_pieces", "enabled": False},
             {"name": "Flip Board", "key": "flip_board", "enabled": False}
         ]
         self._load_settings()
@@ -230,11 +229,19 @@ class ChessDisplay:
         else:
             player_attacked, opponent_attacked = white_attacked, black_attacked
 
+        # Get hanging piece statistics
+        white_hanging, black_hanging = board_state.get_hanging_scores()
+        if is_board_flipped:
+            player_hanging, opponent_hanging = black_hanging, white_hanging
+        else:
+            player_hanging, opponent_hanging = white_hanging, black_hanging
+
         # Table data: (name, player_value, opponent_value, higher_is_better)
         table_data = [
             ("Activity", player_activity, opponent_activity, True),
             ("Development", player_development, opponent_development, True),
             ("Attacked", player_attacked, opponent_attacked, False),  # Lower is better
+            ("Hanging", player_hanging, opponent_hanging, False),  # Lower is better
             ("Pawns", player_pawns, opponent_pawns, True),
             ("Backward", player_backward, opponent_backward, False),  # Lower is better
             ("Isolated", player_isolated, opponent_isolated, False),  # Lower is better
@@ -351,6 +358,8 @@ class ChessDisplay:
             return self._get_developed_pieces(board_state, target_color)
         elif stat_type == "attacked":
             return self._get_attacked_pieces(board_state, target_color)
+        elif stat_type == "hanging":
+            return self._get_hanging_pieces(board_state, target_color)
         elif stat_type == "pawns":
             return self._get_pawn_pieces(board_state, target_color)
         elif stat_type == "backward":
@@ -454,6 +463,11 @@ class ChessDisplay:
 
         return attacked_pieces
 
+    def _get_hanging_pieces(self, board_state, color: bool):
+        """Get all hanging pieces of this color"""
+        hanging_squares = board_state.get_hanging_pieces(color)
+        return [coords_from_square(sq) for sq in hanging_squares]
+
     def _get_pawn_pieces(self, board_state, color: bool):
         """Get all pawn pieces of this color"""
         pawn_pieces = []
@@ -544,9 +558,9 @@ class ChessDisplay:
                 if piece and piece.color == color and piece.piece_type == chess.PAWN:
                     pawns_on_file.append(coords_from_square(square))
 
-            # If more than one pawn on this file, all but the first are "doubled"
+            # If more than one pawn on this file, highlight ALL of them
             if len(pawns_on_file) > 1:
-                doubled_pawns.extend(pawns_on_file[1:])  # Add all but the first
+                doubled_pawns.extend(pawns_on_file)  # Add all pawns on doubled files
 
         return doubled_pawns
 
@@ -752,6 +766,21 @@ class ChessDisplay:
         if highlighted_moves is None:
             highlighted_moves = []
 
+        # Check if any highlighting is active (exchange or statistics)
+        has_exchange_highlights = False
+        has_statistics_highlights = False
+
+        if mouse_pos and not self.hovered_statistic:
+            evaluation_board = preview_board_state if preview_board_state else board_state
+            highlight_positions = self.get_exchange_highlights(mouse_pos, evaluation_board, is_board_flipped)
+            if highlight_positions:
+                has_exchange_highlights = True
+
+        if self.hovered_statistic:
+            has_statistics_highlights = True
+
+        any_highlights_active = has_exchange_highlights or has_statistics_highlights
+
         # Draw the board squares
         for row in range(8):
             for col in range(8):
@@ -765,8 +794,8 @@ class ChessDisplay:
                 is_light = (row + col) % 2 == 0
                 color = self.LIGHT_SQUARE if is_light else self.DARK_SQUARE
 
-                # Apply last move highlighting (lichess-style green overlay)
-                if board_state.last_move:
+                # Apply last move highlighting (lichess-style green overlay) only if NO highlights are active
+                if board_state.last_move and not any_highlights_active:
                     from_coords = coords_from_square(board_state.last_move.from_square)
                     to_coords = coords_from_square(board_state.last_move.to_square)
                     if (row, col) == from_coords or (row, col) == to_coords:
@@ -790,23 +819,6 @@ class ChessDisplay:
                 if (row, col) in highlighted_moves:
                     self.draw_move_indicator(screen, x, y)
 
-                # Draw hanging piece indicator if enabled
-                if self.is_help_option_enabled("hanging_pieces"):
-                    # Use preview board state for helper evaluation if available
-                    evaluation_board = preview_board_state if preview_board_state else board_state
-
-                    # Get the piece that would be at this position in the evaluation board
-                    evaluation_piece = evaluation_board.board.piece_at(square)
-
-                    if evaluation_piece:
-                        hanging_pieces = evaluation_board.get_hanging_pieces(evaluation_piece.color)
-                        if square in hanging_pieces:
-                            # Determine player color based on board orientation
-                            # Player = pieces on bottom (white when not flipped, black when flipped)
-                            player_color = chess.BLACK if is_board_flipped else chess.WHITE
-                            is_player_piece = (evaluation_piece.color == player_color)
-                            self.draw_hanging_piece_indicator(screen, x, y, is_player_piece)
-
                 # Draw exchange evaluation indicator (always enabled)
                 # Use preview board state for helper evaluation if available
                 evaluation_board = preview_board_state if preview_board_state else board_state
@@ -815,6 +827,13 @@ class ChessDisplay:
                 interesting_squares = evaluation_board.get_tactically_interesting_squares()
                 if square in interesting_squares:
                     self.draw_exchange_indicator(screen, x, y)
+
+                # Draw hanging piece indicator (always enabled)
+                white_hanging = set(evaluation_board.get_hanging_pieces(chess.WHITE))
+                black_hanging = set(evaluation_board.get_hanging_pieces(chess.BLACK))
+                all_hanging = white_hanging | black_hanging
+                if square in all_hanging:
+                    self.draw_hanging_indicator(screen, x, y)
 
         # Draw exchange evaluation piece highlights (gray out non-highlighted) if hovering
         # Only run if NOT hovering over statistics (to avoid conflict)
@@ -1158,8 +1177,21 @@ class ChessDisplay:
     def draw_exchange_indicator(self, screen, x: int, y: int) -> None:
         """Draw a subtle indicator for squares with exchange potential"""
         # Small colored corner indicators to mark tactical squares
-        corner_size = 8
+        corner_size = 12
         indicator_color = Colors.ANNOTATION_CAUTION  # Yellow for tactical awareness
+
+        # Draw small triangle in the top-right corner
+        triangle_points = [
+            (x + self.square_size - corner_size, y),
+            (x + self.square_size, y),
+            (x + self.square_size, y + corner_size)
+        ]
+        pygame.draw.polygon(screen, indicator_color, triangle_points)
+
+    def draw_hanging_indicator(self, screen, x: int, y: int) -> None:
+        """Draw a subtle indicator for hanging pieces"""
+        corner_size = 12
+        indicator_color = Colors.ANNOTATION_WARNING  # Red for danger
 
         # Draw small triangle in the top-right corner
         triangle_points = [

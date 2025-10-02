@@ -309,6 +309,16 @@ class BoardState:
         black_attacked = self.count_attacked_pieces(chess.BLACK)
         return (white_attacked, black_attacked)
 
+    def count_hanging_pieces(self, color: bool) -> int:
+        """Count how many pieces of this color are hanging (attacked but not defended)"""
+        return len(self.get_hanging_pieces(color))
+
+    def get_hanging_scores(self) -> Tuple[int, int]:
+        """Get hanging piece counts for both colors. Returns (white_hanging, black_hanging)"""
+        white_hanging = self.count_hanging_pieces(chess.WHITE)
+        black_hanging = self.count_hanging_pieces(chess.BLACK)
+        return (white_hanging, black_hanging)
+
     def count_pawns(self, color: bool) -> int:
         """Count the number of pawns for a given color"""
         count = 0
