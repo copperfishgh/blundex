@@ -74,7 +74,6 @@ class ChessDisplay:
         self.settings_file = ".blundex"
         self.help_options = [
             {"name": "Hanging Pieces", "key": "hanging_pieces", "enabled": False},
-            {"name": "Exchange Evaluation", "key": "exchange_evaluation", "enabled": False},
             {"name": "Flip Board", "key": "flip_board", "enabled": False}
         ]
         self._load_settings()
@@ -224,10 +223,18 @@ class ChessDisplay:
         else:
             player_development, opponent_development = white_development, black_development
 
+        # Get attacked piece statistics
+        white_attacked, black_attacked = board_state.get_attacked_scores()
+        if is_board_flipped:
+            player_attacked, opponent_attacked = black_attacked, white_attacked
+        else:
+            player_attacked, opponent_attacked = white_attacked, black_attacked
+
         # Table data: (name, player_value, opponent_value, higher_is_better)
         table_data = [
             ("Activity", player_activity, opponent_activity, True),
             ("Development", player_development, opponent_development, True),
+            ("Attacked", player_attacked, opponent_attacked, False),  # Lower is better
             ("Pawns", player_pawns, opponent_pawns, True),
             ("Backward", player_backward, opponent_backward, False),  # Lower is better
             ("Isolated", player_isolated, opponent_isolated, False),  # Lower is better
@@ -342,6 +349,8 @@ class ChessDisplay:
             return self._get_activity_squares(board_state, target_color)
         elif stat_type == "development":
             return self._get_developed_pieces(board_state, target_color)
+        elif stat_type == "attacked":
+            return self._get_attacked_pieces(board_state, target_color)
         elif stat_type == "pawns":
             return self._get_pawn_pieces(board_state, target_color)
         elif stat_type == "backward":
@@ -431,6 +440,19 @@ class ChessDisplay:
                 developed_pieces.append(coords_from_square(rook_square))
 
         return developed_pieces
+
+    def _get_attacked_pieces(self, board_state, color: bool):
+        """Get all pieces of this color that are attacked by the enemy"""
+        attacked_pieces = []
+        enemy_color = not color
+
+        for square in chess.SQUARES:
+            piece = board_state.board.piece_at(square)
+            if piece and piece.color == color:
+                if board_state.board.is_attacked_by(enemy_color, square):
+                    attacked_pieces.append(coords_from_square(square))
+
+        return attacked_pieces
 
     def _get_pawn_pieces(self, board_state, color: bool):
         """Get all pawn pieces of this color"""
@@ -785,15 +807,14 @@ class ChessDisplay:
                             is_player_piece = (evaluation_piece.color == player_color)
                             self.draw_hanging_piece_indicator(screen, x, y, is_player_piece)
 
-                # Draw exchange evaluation indicator if enabled
-                if self.is_help_option_enabled("exchange_evaluation"):
-                    # Use preview board state for helper evaluation if available
-                    evaluation_board = preview_board_state if preview_board_state else board_state
+                # Draw exchange evaluation indicator (always enabled)
+                # Use preview board state for helper evaluation if available
+                evaluation_board = preview_board_state if preview_board_state else board_state
 
-                    # Get list of tactically interesting squares
-                    interesting_squares = evaluation_board.get_tactically_interesting_squares()
-                    if square in interesting_squares:
-                        self.draw_exchange_indicator(screen, x, y)
+                # Get list of tactically interesting squares
+                interesting_squares = evaluation_board.get_tactically_interesting_squares()
+                if square in interesting_squares:
+                    self.draw_exchange_indicator(screen, x, y)
 
         # Draw exchange evaluation piece highlights (gray out non-highlighted) if hovering
         # Only run if NOT hovering over statistics (to avoid conflict)
@@ -1159,9 +1180,6 @@ class ChessDisplay:
         Get list of piece positions to highlight based on mouse hover over tactical squares.
         Returns list of (row, col) positions that should be highlighted in blue.
         """
-        if not self.is_help_option_enabled("exchange_evaluation"):
-            return []
-
         # Check if mouse is over a tactically interesting square
         hovered_square = self.get_square_from_mouse(mouse_pos)
         if not hovered_square:

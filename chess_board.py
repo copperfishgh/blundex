@@ -290,6 +290,25 @@ class BoardState:
         black_dev = self.count_developed_pieces(chess.BLACK)
         return (white_dev, black_dev)
 
+    def count_attacked_pieces(self, color: bool) -> int:
+        """Count how many pieces of this color are attacked by the enemy"""
+        enemy_color = not color
+        attacked_count = 0
+
+        for square in chess.SQUARES:
+            piece = self.board.piece_at(square)
+            if piece and piece.color == color:
+                if self.board.is_attacked_by(enemy_color, square):
+                    attacked_count += 1
+
+        return attacked_count
+
+    def get_attacked_scores(self) -> Tuple[int, int]:
+        """Get attacked piece counts for both colors. Returns (white_attacked, black_attacked)"""
+        white_attacked = self.count_attacked_pieces(chess.WHITE)
+        black_attacked = self.count_attacked_pieces(chess.BLACK)
+        return (white_attacked, black_attacked)
+
     def count_pawns(self, color: bool) -> int:
         """Count the number of pawns for a given color"""
         count = 0
