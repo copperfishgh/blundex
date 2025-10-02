@@ -9,6 +9,7 @@ from typing import Optional, Tuple, List
 import pygame
 import json
 import os
+import math
 import chess
 from chess_board import BoardState, square_from_coords, coords_from_square
 from config import GameConfig, Colors, AnimationConfig, GameConstants
@@ -89,6 +90,12 @@ class ChessDisplay:
         # Statistics hover feedback system
         self.hovered_statistic = None  # (stat_type, player_or_opponent) e.g., ("activity", "player")
         self.statistic_cell_rects = {}  # Track clickable areas for each statistic
+
+        # Cached gradient surfaces for piece glows
+        self.hanging_glow_surface = None
+        self.hanging_glow_size = None
+        self.attacked_glow_surface = None
+        self.attacked_glow_size = None
 
     def invalidate_activity_cache(self):
         """Invalidate activity cache when board state changes"""
@@ -809,8 +816,26 @@ class ChessDisplay:
                 pygame.draw.rect(screen, color,
                                (x, y, self.square_size, self.square_size))
 
-                # Draw piece if present (skip if being dragged)
+                # Draw piece glow BEFORE piece (so piece appears on top)
                 square = square_from_coords(row, col)
+                evaluation_board = preview_board_state if preview_board_state else board_state
+
+                # Check if piece is hanging (red glow)
+                white_hanging = set(evaluation_board.get_hanging_pieces(chess.WHITE))
+                black_hanging = set(evaluation_board.get_hanging_pieces(chess.BLACK))
+                all_hanging = white_hanging | black_hanging
+
+                if square in all_hanging:
+                    self.draw_hanging_indicator(screen, x, y)
+                else:
+                    # Check if piece is attacked but not hanging (magenta glow)
+                    piece_at_square = evaluation_board.board.piece_at(square)
+                    if piece_at_square:
+                        enemy_color = not piece_at_square.color
+                        if evaluation_board.board.is_attacked_by(enemy_color, square):
+                            self.draw_attacked_indicator(screen, x, y)
+
+                # Draw piece if present (skip if being dragged)
                 piece = board_state.board.piece_at(square)
                 if piece and not (dragging_piece and drag_origin and (row, col) == drag_origin):
                     self.draw_piece(screen, piece, x, y, row, col)
@@ -819,21 +844,7 @@ class ChessDisplay:
                 if (row, col) in highlighted_moves:
                     self.draw_move_indicator(screen, x, y)
 
-                # Draw exchange evaluation indicator (always enabled)
-                # Use preview board state for helper evaluation if available
-                evaluation_board = preview_board_state if preview_board_state else board_state
-
-                # Get list of tactically interesting squares
-                interesting_squares = evaluation_board.get_tactically_interesting_squares()
-                if square in interesting_squares:
-                    self.draw_exchange_indicator(screen, x, y)
-
-                # Draw hanging piece indicator (always enabled)
-                white_hanging = set(evaluation_board.get_hanging_pieces(chess.WHITE))
-                black_hanging = set(evaluation_board.get_hanging_pieces(chess.BLACK))
-                all_hanging = white_hanging | black_hanging
-                if square in all_hanging:
-                    self.draw_hanging_indicator(screen, x, y)
+                # Exchange evaluation triangles removed
 
         # Draw exchange evaluation piece highlights (gray out non-highlighted) if hovering
         # Only run if NOT hovering over statistics (to avoid conflict)
@@ -1188,18 +1199,48 @@ class ChessDisplay:
         ]
         pygame.draw.polygon(screen, indicator_color, triangle_points)
 
-    def draw_hanging_indicator(self, screen, x: int, y: int) -> None:
-        """Draw a subtle indicator for hanging pieces"""
-        corner_size = 12
-        indicator_color = Colors.ANNOTATION_WARNING  # Red for danger
+    def _create_hanging_glow_surface(self, size: int) -> pygame.Surface:
+        """Create a cached solid color disk for hanging piece indicator"""
+        surface = pygame.Surface((size, size), pygame.SRCALPHA)
+        center = size // 2
+        radius = int(size * 0.4)  # 40% of square width
 
-        # Draw small triangle in the top-right corner
-        triangle_points = [
-            (x + self.square_size - corner_size, y),
-            (x + self.square_size, y),
-            (x + self.square_size, y + corner_size)
-        ]
-        pygame.draw.polygon(screen, indicator_color, triangle_points)
+        # Draw solid red disk
+        pygame.draw.circle(surface, Colors.ANNOTATION_WARNING, (center, center), radius)
+
+        return surface
+
+    def _create_attacked_glow_surface(self, size: int) -> pygame.Surface:
+        """Create a cached solid color disk for attacked piece indicator"""
+        surface = pygame.Surface((size, size), pygame.SRCALPHA)
+        center = size // 2
+        radius = int(size * 0.4)  # 40% of square width
+
+        # Draw solid yellow disk
+        yellow = (255, 255, 0)
+        pygame.draw.circle(surface, yellow, (center, center), radius)
+
+        return surface
+
+    def draw_hanging_indicator(self, screen, x: int, y: int) -> None:
+        """Draw a red gradient glow behind hanging pieces (uses cached surface)"""
+        # Create or reuse cached gradient surface
+        if self.hanging_glow_surface is None or self.hanging_glow_size != self.square_size:
+            self.hanging_glow_surface = self._create_hanging_glow_surface(self.square_size)
+            self.hanging_glow_size = self.square_size
+
+        # Blit the cached gradient
+        screen.blit(self.hanging_glow_surface, (x, y))
+
+    def draw_attacked_indicator(self, screen, x: int, y: int) -> None:
+        """Draw a yellow gradient glow behind attacked pieces (uses cached surface)"""
+        # Create or reuse cached gradient surface
+        if self.attacked_glow_surface is None or self.attacked_glow_size != self.square_size:
+            self.attacked_glow_surface = self._create_attacked_glow_surface(self.square_size)
+            self.attacked_glow_size = self.square_size
+
+        # Blit the cached gradient
+        screen.blit(self.attacked_glow_surface, (x, y))
 
     def draw_gray_overlay(self, screen, x: int, y: int) -> None:
         """Draw a semi-transparent gray overlay to dim non-highlighted squares"""
