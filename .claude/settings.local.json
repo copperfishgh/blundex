@@ -14,7 +14,8 @@
       "WebFetch(domain:claude.ai)",
       "Bash(cat:*)",
       "Bash(git restore:*)",
-      "Read(//c/Users/rickf/Desktop/blundex/capablanca/**)"
+      "Read(//c/Users/rickf/Desktop/blundex/capablanca/**)",
+      "Bash(git merge:*)"
     ],
     "deny": [],
     "ask": []
