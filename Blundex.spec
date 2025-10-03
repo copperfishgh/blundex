@@ -17,7 +17,11 @@ a = Analysis(
     datas=[
         ('pngs', 'pngs'),  # Include chess piece images
     ],
-    hiddenimports=[],
+    hiddenimports=[
+        'jaraco.text',
+        'jaraco.functools',
+        'jaraco.context',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -26,7 +30,6 @@ a = Analysis(
         'scipy',
         'pandas',
         'PIL',
-        'setuptools',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
