@@ -926,7 +926,7 @@ class BoardState:
             return True
 
         except Exception as e:
-            print(f"Error loading PGN file: {e}")
+            # Failed to load PGN file
             return False
 
     def save_pgn_file(self, filename: str, white_player: str = "Player", black_player: str = "Opponent", event: str = "Casual Game") -> bool:
@@ -953,7 +953,7 @@ class BoardState:
             return True
 
         except Exception as e:
-            print(f"Error saving PGN file: {e}")
+            # Failed to save PGN file
             return False
 
     def __str__(self) -> str:
@@ -977,12 +977,3 @@ def coords_from_square(square: chess.Square) -> Tuple[int, int]:
     row = 7 - rank  # Invert: rank 7 -> row 0, rank 0 -> row 7
     col = file
     return (row, col)
-
-
-# Example usage
-if __name__ == "__main__":
-    board = BoardState()
-    print("Initial Chess Position:")
-    print(board)
-    print(f"\nFEN: {board.get_fen_position()}")
-    print(f"Current turn: {'White' if board.board.turn == chess.WHITE else 'Black'}")
