@@ -40,6 +40,10 @@ class BoardState:
         self.undo_stack: List[Tuple[chess.Board, List[chess.Move], Optional[chess.Move]]] = []
         self.redo_stack: List[Tuple[chess.Board, List[chess.Move], Optional[chess.Move]]] = []
 
+        # Mega-loop analysis cache - computed lazily on first access
+        self._analysis: Optional[dict] = None
+        self._analysis_valid = False
+
         self._update_game_status()
 
     @property
@@ -53,6 +57,286 @@ class BoardState:
                 self.black_queenside = board.has_queenside_castling_rights(chess.BLACK)
         return CastlingRights(self.board)
 
+    # ========== MEGA-LOOP ANALYSIS INFRASTRUCTURE ==========
+
+    def _invalidate_analysis(self) -> None:
+        """Invalidate cached analysis after position changes"""
+        self._analysis_valid = False
+
+    def _ensure_analysis(self) -> None:
+        """Compute analysis if not already cached (lazy evaluation)"""
+        if not self._analysis_valid:
+            self._analysis = self._compute_board_analysis()
+            self._analysis_valid = True
+
+    def _compute_board_analysis(self) -> dict:
+        """
+        Mega-loop: Single-pass bitboard-optimized board analysis.
+        Computes all tactical patterns in one iteration through occupied squares.
+
+        Performance: ~2-3x baseline cost for complete tactical analysis.
+        Uses python-chess SquareSet (bitboard wrapper) for O(1) operations.
+        """
+        analysis = {
+            # SECTION 1: Initialize storage
+            # Hanging pieces (used by: get_hanging_pieces, hanging piece indicator)
+            'white_hanging': [],
+            'black_hanging': [],
+            # Attacked pieces (used by: count_attacked_pieces, attacked indicator)
+            'white_attacked': [],
+            'black_attacked': [],
+            # Pinned pieces (used by: get_pinned_pieces, pin indicator)
+            'white_pinned': [],
+            'black_pinned': [],
+            # Skewered pieces (used by: get_skewered_pieces, skewer indicator)
+            'white_skewered': [],
+            'black_skewered': [],
+            # Pawn patterns (used by: pawn statistics display)
+            'white_isolated': [],
+            'black_isolated': [],
+            'white_doubled': [],
+            'black_doubled': [],
+            'white_passed': [],
+            'black_passed': [],
+            'white_backward': [],
+            'black_backward': [],
+        }
+
+        # SECTION 2: Basic piece information + hanging/attacked detection
+        # BITBOARD: Iterate only occupied squares (~25 pieces) instead of all 64
+        for square in chess.SquareSet(self.board.occupied):
+            piece = self.board.piece_at(square)
+            if not piece:
+                continue
+
+            enemy_color = not piece.color
+
+            # BITBOARD: attackers() returns SquareSet (bitboard wrapper)
+            # Keep as SquareSet - don't convert to Python set!
+            attackers = self.board.attackers(enemy_color, square)
+            defenders = self.board.attackers(piece.color, square)
+
+            # Check if attacked (len on SquareSet is O(1) popcount)
+            if len(attackers) > 0:
+                if piece.color == chess.WHITE:
+                    analysis['white_attacked'].append(square)
+                else:
+                    analysis['black_attacked'].append(square)
+
+                # Check if hanging (attacked AND not defended)
+                if len(defenders) == 0:
+                    if piece.color == chess.WHITE:
+                        analysis['white_hanging'].append(square)
+                    else:
+                        analysis['black_hanging'].append(square)
+
+        # SECTION 3: Pins and skewers
+        # Pin detection: Use built-in board.is_pinned() for efficiency
+        # Skewer detection: Custom implementation using BB_RAYS
+
+        # --- PIN DETECTION ---
+        # BITBOARD: Get all non-pawn pieces for both colors
+        white_pieces = chess.SquareSet(self.board.occupied_co[chess.WHITE])
+        black_pieces = chess.SquareSet(self.board.occupied_co[chess.BLACK])
+
+        white_non_pawn = white_pieces & ~chess.SquareSet(self.board.pawns)
+        black_non_pawn = black_pieces & ~chess.SquareSet(self.board.pawns)
+
+        # Check white pieces for pins
+        for square in white_non_pawn:
+            if self.board.is_pinned(chess.WHITE, square):
+                analysis['white_pinned'].append(square)
+
+        # Check black pieces for pins
+        for square in black_non_pawn:
+            if self.board.is_pinned(chess.BLACK, square):
+                analysis['black_pinned'].append(square)
+
+        # --- SKEWER DETECTION ---
+        # Process both colors
+        for color in [chess.WHITE, chess.BLACK]:
+            enemy_color = not color
+            color_pieces = white_pieces if color == chess.WHITE else black_pieces
+
+            # BITBOARD: Get only enemy sliding pieces (B/R/Q can create skewers)
+            enemy_sliding_pieces = chess.SquareSet(self.board.occupied_co[enemy_color]) & (
+                chess.SquareSet(self.board.bishops) |
+                chess.SquareSet(self.board.rooks) |
+                chess.SquareSet(self.board.queens)
+            )
+
+            for attacker_square in enemy_sliding_pieces:
+                # Get all squares this sliding piece attacks
+                attacked_squares = self.board.attacks(attacker_square)
+
+                # Check each attacked piece of our color
+                for attacked_square in (attacked_squares & color_pieces):
+                    attacked_piece = self.board.piece_at(attacked_square)
+
+                    # Skip pawns (not considered skewerable)
+                    if attacked_piece.piece_type == chess.PAWN:
+                        continue
+
+                    # BITBOARD: Get full ray between attacker and attacked piece (O(1))
+                    if attacked_square in chess.BB_RAYS[attacker_square]:
+                        ray = chess.BB_RAYS[attacker_square][attacked_square]
+
+                        # Look for pieces behind the attacked piece on the same ray
+                        for behind_square in chess.SquareSet(ray):
+                            # Skip the attacker and attacked squares
+                            if behind_square in (attacker_square, attacked_square):
+                                continue
+
+                            # Only check squares beyond the attacked piece
+                            if chess.square_distance(attacker_square, behind_square) <= \
+                               chess.square_distance(attacker_square, attacked_square):
+                                continue
+
+                            behind_piece = self.board.piece_at(behind_square)
+
+                            # Found a piece behind?
+                            if behind_piece and behind_piece.color == color:
+                                # Check if it's a valid skewer (front >= back in value)
+                                # OR if front piece is king (absolute skewer)
+                                front_value = GameConstants.PIECE_VALUES[attacked_piece.piece_type]
+                                back_value = GameConstants.PIECE_VALUES[behind_piece.piece_type]
+
+                                is_skewer = (front_value >= back_value or
+                                           attacked_piece.piece_type == chess.KING)
+
+                                if is_skewer:
+                                    # BITBOARD: Verify no pieces between front and back (O(1))
+                                    between_squares = chess.between(attacked_square, behind_square)
+                                    if not any(self.board.piece_at(sq) for sq in between_squares):
+                                        # Valid skewer detected!
+                                        if color == chess.WHITE:
+                                            analysis['white_skewered'].append(attacked_square)
+                                        else:
+                                            analysis['black_skewered'].append(attacked_square)
+                                        break  # Only need first skewer on this ray
+
+        # SECTION 4: Pawn patterns
+        # BITBOARD: Get pawn bitboards for both colors
+        white_pawns = chess.SquareSet(self.board.pawns & self.board.occupied_co[chess.WHITE])
+        black_pawns = chess.SquareSet(self.board.pawns & self.board.occupied_co[chess.BLACK])
+
+        # File masks for bitboard operations (8 iterations, not 64!)
+        FILE_MASKS = [chess.BB_FILES[i] for i in range(8)]
+
+        # --- DOUBLED PAWNS (check each file) ---
+        for file_idx in range(8):
+            white_on_file = white_pawns & chess.SquareSet(FILE_MASKS[file_idx])
+            if len(white_on_file) > 1:
+                for square in white_on_file:
+                    analysis['white_doubled'].append(square)
+
+            black_on_file = black_pawns & chess.SquareSet(FILE_MASKS[file_idx])
+            if len(black_on_file) > 1:
+                for square in black_on_file:
+                    analysis['black_doubled'].append(square)
+
+        # --- ISOLATED PAWNS ---
+        for square in white_pawns:
+            file = chess.square_file(square)
+            # BITBOARD: Check adjacent files with bitboard operations
+            left_file = FILE_MASKS[file-1] if file > 0 else 0
+            right_file = FILE_MASKS[file+1] if file < 7 else 0
+            adjacent_mask = left_file | right_file
+            # Instant check: are there any white pawns on adjacent files?
+            if not (white_pawns & chess.SquareSet(adjacent_mask)):
+                analysis['white_isolated'].append(square)
+
+        for square in black_pawns:
+            file = chess.square_file(square)
+            left_file = FILE_MASKS[file-1] if file > 0 else 0
+            right_file = FILE_MASKS[file+1] if file < 7 else 0
+            adjacent_mask = left_file | right_file
+            if not (black_pawns & chess.SquareSet(adjacent_mask)):
+                analysis['black_isolated'].append(square)
+
+        # --- PASSED PAWNS ---
+        for square in white_pawns:
+            rank = chess.square_rank(square)
+            file = chess.square_file(square)
+            # Check if no enemy pawns block path to promotion (ranks ahead)
+            is_passed = True
+            for check_file in [file - 1, file, file + 1]:
+                if 0 <= check_file <= 7:
+                    for check_rank in range(rank + 1, 8):
+                        check_square = chess.square(check_file, check_rank)
+                        if check_square in black_pawns:
+                            is_passed = False
+                            break
+                    if not is_passed:
+                        break
+            if is_passed:
+                analysis['white_passed'].append(square)
+
+        for square in black_pawns:
+            rank = chess.square_rank(square)
+            file = chess.square_file(square)
+            is_passed = True
+            for check_file in [file - 1, file, file + 1]:
+                if 0 <= check_file <= 7:
+                    for check_rank in range(0, rank):
+                        check_square = chess.square(check_file, check_rank)
+                        if check_square in white_pawns:
+                            is_passed = False
+                            break
+                    if not is_passed:
+                        break
+            if is_passed:
+                analysis['black_passed'].append(square)
+
+        # --- BACKWARD PAWNS ---
+        for square in white_pawns:
+            rank = chess.square_rank(square)
+            file = chess.square_file(square)
+            # Can be defended by friendly pawn?
+            can_be_defended = False
+            if rank > 0:  # Not on first rank
+                for defend_file in [file - 1, file + 1]:
+                    if 0 <= defend_file <= 7:
+                        defend_square = chess.square(defend_file, rank - 1)
+                        if defend_square in white_pawns:
+                            can_be_defended = True
+                            break
+            # Can safely advance?
+            can_safely_advance = True
+            if rank < 7:  # Not on last rank
+                for enemy_file in [file - 1, file + 1]:
+                    if 0 <= enemy_file <= 7 and rank + 2 <= 7:
+                        enemy_square = chess.square(enemy_file, rank + 2)
+                        if enemy_square in black_pawns:
+                            can_safely_advance = False
+                            break
+            if not can_be_defended and not can_safely_advance:
+                analysis['white_backward'].append(square)
+
+        for square in black_pawns:
+            rank = chess.square_rank(square)
+            file = chess.square_file(square)
+            can_be_defended = False
+            if rank < 7:  # Not on last rank
+                for defend_file in [file - 1, file + 1]:
+                    if 0 <= defend_file <= 7:
+                        defend_square = chess.square(defend_file, rank + 1)
+                        if defend_square in black_pawns:
+                            can_be_defended = True
+                            break
+            can_safely_advance = True
+            if rank > 0:  # Not on first rank
+                for enemy_file in [file - 1, file + 1]:
+                    if 0 <= enemy_file <= 7 and rank - 2 >= 0:
+                        enemy_square = chess.square(enemy_file, rank - 2)
+                        if enemy_square in white_pawns:
+                            can_safely_advance = False
+                            break
+            if not can_be_defended and not can_safely_advance:
+                analysis['black_backward'].append(square)
+
+        return analysis
+
     def reset_to_initial_position(self) -> None:
         """Reset the entire game state to the initial starting position"""
         self.board = chess.Board()
@@ -61,6 +345,7 @@ class BoardState:
         self.last_move = None
         self.undo_stack = []
         self.redo_stack = []
+        self._invalidate_analysis()  # Invalidate cache after position change
 
 
     def is_king_in_check(self, color: bool) -> bool:
@@ -96,33 +381,8 @@ class BoardState:
 
     def get_hanging_pieces(self, color: bool) -> List[chess.Square]:
         """Get list of hanging pieces (attacked but not defended) for the given color"""
-        hanging_pieces = []
-
-        for square in chess.SQUARES:
-            piece = self.board.piece_at(square)
-            if piece and piece.color == color:
-                if self._is_piece_hanging_simple(square):
-                    hanging_pieces.append(square)
-
-        return hanging_pieces
-
-    def _is_piece_hanging_simple(self, square: chess.Square) -> bool:
-        """Simple check: is piece attacked but not defended?"""
-        piece = self.board.piece_at(square)
-        if not piece:
-            return False
-
-        enemy_color = not piece.color
-
-        # Is it attacked by an enemy?
-        if not self.board.is_attacked_by(enemy_color, square):
-            return False
-
-        # Is it defended by a friendly piece?
-        if self.board.is_attacked_by(piece.color, square):
-            return False
-
-        return True  # Attacked but not defended = hanging
+        self._ensure_analysis()
+        return self._analysis['white_hanging' if color == chess.WHITE else 'black_hanging']
 
     def _get_attackers(self, target_square: chess.Square, attacker_color: bool) -> List[chess.Square]:
         """Get all pieces of the given color that attack the target square"""
@@ -293,16 +553,9 @@ class BoardState:
 
     def count_attacked_pieces(self, color: bool) -> int:
         """Count how many pieces of this color are attacked by the enemy"""
-        enemy_color = not color
-        attacked_count = 0
-
-        for square in chess.SQUARES:
-            piece = self.board.piece_at(square)
-            if piece and piece.color == color:
-                if self.board.is_attacked_by(enemy_color, square):
-                    attacked_count += 1
-
-        return attacked_count
+        self._ensure_analysis()
+        attacked_list = self._analysis['white_attacked' if color == chess.WHITE else 'black_attacked']
+        return len(attacked_list)
 
     def get_attacked_scores(self) -> Tuple[int, int]:
         """Get attacked piece counts for both colors. Returns (white_attacked, black_attacked)"""
@@ -321,74 +574,14 @@ class BoardState:
         return (white_hanging, black_hanging)
 
     def get_pinned_pieces(self, color: bool) -> List[int]:
-        """
-        Find all pinned pieces for the given color (both absolute and relative pins).
+        """Get list of pinned pieces for the given color"""
+        self._ensure_analysis()
+        return self._analysis['white_pinned' if color == chess.WHITE else 'black_pinned']
 
-        Absolute pin: piece pinned to the king (moving it would expose king to check)
-        Relative pin: piece pinned to a valuable piece (moving it would lose material)
-        """
-        pinned_pieces = []
-        king_square = self.board.king(color)
-
-        if king_square is None:
-            return pinned_pieces
-
-        # Check all friendly pieces for both absolute and relative pins
-        for square in chess.SQUARES:
-            piece = self.board.piece_at(square)
-            if piece and piece.color == color and square != king_square and piece.piece_type != chess.PAWN:
-                # Check for absolute pin (pinned to king)
-                if self.board.is_pinned(color, square):
-                    pinned_pieces.append(square)
-                    continue
-
-                # Check for relative pin (pinned to valuable piece)
-                # Look for sliding pieces (bishop, rook, queen) attacking this square
-                enemy_color = not color
-                attackers = self.board.attackers(enemy_color, square)
-
-                for attacker_square in attackers:
-                    attacker = self.board.piece_at(attacker_square)
-                    # Only sliding pieces can create pins
-                    if attacker and attacker.piece_type in [chess.BISHOP, chess.ROOK, chess.QUEEN]:
-                        # Check if there's a more valuable piece behind this one on the same line
-                        # Get the direction from attacker to this piece
-                        file_diff = chess.square_file(square) - chess.square_file(attacker_square)
-                        rank_diff = chess.square_rank(square) - chess.square_rank(attacker_square)
-
-                        # Normalize to direction (-1, 0, or 1)
-                        if file_diff != 0:
-                            file_dir = file_diff // abs(file_diff)
-                        else:
-                            file_dir = 0
-                        if rank_diff != 0:
-                            rank_dir = rank_diff // abs(rank_diff)
-                        else:
-                            rank_dir = 0
-
-                        # Continue in the same direction to see if there's a friendly piece behind
-                        current_file = chess.square_file(square) + file_dir
-                        current_rank = chess.square_rank(square) + rank_dir
-
-                        while 0 <= current_file < 8 and 0 <= current_rank < 8:
-                            behind_square = chess.square(current_file, current_rank)
-                            behind_piece = self.board.piece_at(behind_square)
-
-                            if behind_piece:
-                                # Found a piece behind - check if it's friendly and more valuable
-                                if behind_piece.color == color:
-                                    piece_value = GameConstants.PIECE_VALUES.get(piece.piece_type, 0)
-                                    behind_value = GameConstants.PIECE_VALUES.get(behind_piece.piece_type, 0)
-
-                                    # This is a pin if the piece behind is more valuable (or equal value like queen)
-                                    if behind_value > piece_value or (behind_piece.piece_type == chess.QUEEN):
-                                        pinned_pieces.append(square)
-                                break  # Stop searching in this direction
-
-                            current_file += file_dir
-                            current_rank += rank_dir
-
-        return pinned_pieces
+    def get_skewered_pieces(self, color: bool) -> List[int]:
+        """Get list of skewered pieces for the given color"""
+        self._ensure_analysis()
+        return self._analysis['white_skewered' if color == chess.WHITE else 'black_skewered']
 
     def count_pawns(self, color: bool) -> int:
         """Count the number of pawns for a given color"""
@@ -407,125 +600,27 @@ class BoardState:
 
     def count_backward_pawns(self, color: bool) -> int:
         """Count backward pawns - pawns that cannot be defended by other pawns and cannot safely advance"""
-        backward_count = 0
-        enemy_color = not color
-        pawn_direction = 1 if color == chess.WHITE else -1
-
-        for square in chess.SQUARES:
-            piece = self.board.piece_at(square)
-            if piece and piece.color == color and piece.piece_type == chess.PAWN:
-                rank = chess.square_rank(square)
-                file = chess.square_file(square)
-
-                # Check if pawn can be defended
-                can_be_defended = False
-                defend_rank = rank - pawn_direction
-                if 0 <= defend_rank <= 7:
-                    for defend_file in [file - 1, file + 1]:
-                        if 0 <= defend_file <= 7:
-                            defend_square = chess.square(defend_file, defend_rank)
-                            defender = self.board.piece_at(defend_square)
-                            if defender and defender.color == color and defender.piece_type == chess.PAWN:
-                                can_be_defended = True
-                                break
-
-                # Check if pawn can safely advance
-                can_safely_advance = True
-                advance_rank = rank + pawn_direction
-                if 0 <= advance_rank <= 7:
-                    for enemy_file in [file - 1, file + 1]:
-                        if 0 <= enemy_file <= 7:
-                            enemy_attack_rank = advance_rank + pawn_direction
-                            if 0 <= enemy_attack_rank <= 7:
-                                enemy_square = chess.square(enemy_file, enemy_attack_rank)
-                                enemy_piece = self.board.piece_at(enemy_square)
-                                if enemy_piece and enemy_piece.color == enemy_color and enemy_piece.piece_type == chess.PAWN:
-                                    can_safely_advance = False
-                                    break
-
-                if not can_be_defended and not can_safely_advance:
-                    backward_count += 1
-
-        return backward_count
+        self._ensure_analysis()
+        backward_list = self._analysis['white_backward' if color == chess.WHITE else 'black_backward']
+        return len(backward_list)
 
     def count_isolated_pawns(self, color: bool) -> int:
         """Count pawns with no friendly pawns on adjacent files"""
-        isolated_count = 0
-
-        for square in chess.SQUARES:
-            piece = self.board.piece_at(square)
-            if piece and piece.color == color and piece.piece_type == chess.PAWN:
-                file = chess.square_file(square)
-
-                # Check adjacent files
-                has_adjacent_pawn = False
-                for adjacent_file in [file - 1, file + 1]:
-                    if 0 <= adjacent_file <= 7:
-                        for check_rank in range(8):
-                            check_square = chess.square(adjacent_file, check_rank)
-                            adjacent_piece = self.board.piece_at(check_square)
-                            if adjacent_piece and adjacent_piece.color == color and adjacent_piece.piece_type == chess.PAWN:
-                                has_adjacent_pawn = True
-                                break
-                        if has_adjacent_pawn:
-                            break
-
-                if not has_adjacent_pawn:
-                    isolated_count += 1
-
-        return isolated_count
+        self._ensure_analysis()
+        isolated_list = self._analysis['white_isolated' if color == chess.WHITE else 'black_isolated']
+        return len(isolated_list)
 
     def count_doubled_pawns(self, color: bool) -> int:
         """Count pawns that are doubled (more than one pawn on the same file)"""
-        doubled_count = 0
-
-        for file in range(8):
-            pawns_on_file = 0
-            for rank in range(8):
-                square = chess.square(file, rank)
-                piece = self.board.piece_at(square)
-                if piece and piece.color == color and piece.piece_type == chess.PAWN:
-                    pawns_on_file += 1
-
-            if pawns_on_file > 1:
-                doubled_count += pawns_on_file - 1
-
-        return doubled_count
+        self._ensure_analysis()
+        doubled_list = self._analysis['white_doubled' if color == chess.WHITE else 'black_doubled']
+        return len(doubled_list)
 
     def count_passed_pawns(self, color: bool) -> int:
         """Count passed pawns - pawns with no opponent pawns blocking their path to promotion"""
-        passed_count = 0
-        enemy_color = not color
-        promotion_direction = 1 if color == chess.WHITE else -1
-
-        for square in chess.SQUARES:
-            piece = self.board.piece_at(square)
-            if piece and piece.color == color and piece.piece_type == chess.PAWN:
-                rank = chess.square_rank(square)
-                file = chess.square_file(square)
-
-                # Check if this pawn is passed
-                is_passed = True
-
-                # Check path to promotion on this file and adjacent files
-                for check_file in [file - 1, file, file + 1]:
-                    if 0 <= check_file <= 7:
-                        check_rank = rank + promotion_direction
-                        while 0 <= check_rank <= 7:
-                            check_square = chess.square(check_file, check_rank)
-                            enemy_piece = self.board.piece_at(check_square)
-                            if enemy_piece and enemy_piece.color == enemy_color and enemy_piece.piece_type == chess.PAWN:
-                                is_passed = False
-                                break
-                            check_rank += promotion_direction
-
-                        if not is_passed:
-                            break
-
-                if is_passed:
-                    passed_count += 1
-
-        return passed_count
+        self._ensure_analysis()
+        passed_list = self._analysis['white_passed' if color == chess.WHITE else 'black_passed']
+        return len(passed_list)
 
     def get_pawn_statistics(self) -> Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]:
         """Get pawn statistics for both colors"""
@@ -596,6 +691,7 @@ class BoardState:
 
         # Update game status
         self._update_game_status()
+        self._invalidate_analysis()  # Invalidate cache after move
 
         return True
 
@@ -627,6 +723,7 @@ class BoardState:
 
         # Update game status
         self._update_game_status()
+        self._invalidate_analysis()  # Invalidate cache after move
 
         return True
 
@@ -696,6 +793,7 @@ class BoardState:
         self.last_move = previous_last_move
 
         self._update_game_status()
+        self._invalidate_analysis()  # Invalidate cache after undo
         return True
 
     def redo_move(self) -> bool:
@@ -714,6 +812,7 @@ class BoardState:
         self.last_move = next_last_move
 
         self._update_game_status()
+        self._invalidate_analysis()  # Invalidate cache after redo
         return True
 
     def load_pgn_file(self, filename: str) -> bool:
@@ -745,6 +844,7 @@ class BoardState:
             self.redo_stack = []
 
             self._update_game_status()
+            self._invalidate_analysis()  # Invalidate cache after loading PGN
             return True
 
         except Exception as e:
