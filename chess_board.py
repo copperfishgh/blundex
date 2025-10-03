@@ -249,6 +249,10 @@ class BoardState:
 
                             # Found a piece behind?
                             if behind_piece and behind_piece.color == color:
+                                # Skip if the behind piece is a pawn (too common, not tactically significant)
+                                if behind_piece.piece_type == chess.PAWN:
+                                    continue
+
                                 # Check if it's a valid skewer (front >= back in value)
                                 # OR if front piece is king (absolute skewer)
                                 front_value = GameConstants.PIECE_VALUES[attacked_piece.piece_type]
