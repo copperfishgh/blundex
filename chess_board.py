@@ -13,7 +13,9 @@ Uses python-chess types directly:
 
 from typing import Optional, List, Tuple
 import copy
+import io
 import chess
+import chess.pgn
 from config import GameConstants
 
 
@@ -142,15 +144,66 @@ class BoardState:
         white_non_pawn = white_pieces & ~chess.SquareSet(self.board.pawns)
         black_non_pawn = black_pieces & ~chess.SquareSet(self.board.pawns)
 
-        # Check white pieces for pins
-        for square in white_non_pawn:
-            if self.board.is_pinned(chess.WHITE, square):
-                analysis['white_pinned'].append(square)
+        # --- PIN DETECTION ---
+        # Detect both absolute pins (to king) and relative pins (to valuable pieces)
+        for color in [chess.WHITE, chess.BLACK]:
+            enemy_color = not color
+            color_pieces = white_pieces if color == chess.WHITE else black_pieces
 
-        # Check black pieces for pins
-        for square in black_non_pawn:
-            if self.board.is_pinned(chess.BLACK, square):
-                analysis['black_pinned'].append(square)
+            # Get enemy sliding pieces (B/R/Q can create pins)
+            enemy_sliding_pieces = chess.SquareSet(self.board.occupied_co[enemy_color]) & (
+                chess.SquareSet(self.board.bishops) |
+                chess.SquareSet(self.board.rooks) |
+                chess.SquareSet(self.board.queens)
+            )
+
+            for attacker_square in enemy_sliding_pieces:
+                # Get all squares this sliding piece attacks
+                attacked_squares = self.board.attacks(attacker_square)
+
+                # Check each attacked piece of our color
+                for attacked_square in (attacked_squares & color_pieces):
+                    attacked_piece = self.board.piece_at(attacked_square)
+
+                    # Skip pawns (not considered pinnable for display purposes)
+                    if attacked_piece.piece_type == chess.PAWN:
+                        continue
+
+                    # Get ray from attacker through attacked piece
+                    ray = chess.BB_RAYS[attacker_square][attacked_square]
+                    if ray:
+                        # Look for valuable pieces behind the attacked piece on the same ray
+                        for behind_square in chess.SquareSet(ray):
+                            # Skip the attacker and attacked squares
+                            if behind_square in (attacker_square, attacked_square):
+                                continue
+
+                            # Only check squares beyond the attacked piece
+                            if chess.square_distance(attacker_square, behind_square) <= \
+                               chess.square_distance(attacker_square, attacked_square):
+                                continue
+
+                            behind_piece = self.board.piece_at(behind_square)
+
+                            # Found a piece behind?
+                            if behind_piece and behind_piece.color == color:
+                                # Check if it's a valid pin (behind piece must be king or higher value)
+                                behind_value = GameConstants.PIECE_VALUES[behind_piece.piece_type]
+                                front_value = GameConstants.PIECE_VALUES[attacked_piece.piece_type]
+
+                                is_pin = (behind_piece.piece_type == chess.KING or
+                                         behind_value > front_value)
+
+                                if is_pin:
+                                    # Verify no pieces between front and back
+                                    between_squares = chess.SquareSet(chess.between(attacked_square, behind_square))
+                                    if not any(self.board.piece_at(sq) for sq in between_squares):
+                                        # Valid pin detected!
+                                        if color == chess.WHITE:
+                                            analysis['white_pinned'].append(attacked_square)
+                                        else:
+                                            analysis['black_pinned'].append(attacked_square)
+                                        break  # Only need first pin on this ray
 
         # --- SKEWER DETECTION ---
         # Process both colors
@@ -178,8 +231,8 @@ class BoardState:
                         continue
 
                     # BITBOARD: Get full ray between attacker and attacked piece (O(1))
-                    if attacked_square in chess.BB_RAYS[attacker_square]:
-                        ray = chess.BB_RAYS[attacker_square][attacked_square]
+                    ray = chess.BB_RAYS[attacker_square][attacked_square]
+                    if ray:  # Non-zero bitboard means there's a ray between these squares
 
                         # Look for pieces behind the attacked piece on the same ray
                         for behind_square in chess.SquareSet(ray):
@@ -206,7 +259,7 @@ class BoardState:
 
                                 if is_skewer:
                                     # BITBOARD: Verify no pieces between front and back (O(1))
-                                    between_squares = chess.between(attacked_square, behind_square)
+                                    between_squares = chess.SquareSet(chess.between(attacked_square, behind_square))
                                     if not any(self.board.piece_at(sq) for sq in between_squares):
                                         # Valid skewer detected!
                                         if color == chess.WHITE:
@@ -385,15 +438,36 @@ class BoardState:
         return self._analysis['white_hanging' if color == chess.WHITE else 'black_hanging']
 
     def _get_attackers(self, target_square: chess.Square, attacker_color: bool) -> List[chess.Square]:
-        """Get all pieces of the given color that attack the target square"""
+        """Get all pieces of the given color that attack the target square (including x-ray attacks)"""
         attackers = []
 
-        for square in chess.SQUARES:
-            piece = self.board.piece_at(square)
-            if piece and piece.color == attacker_color:
-                piece_attacks = self.board.attacks(square)
-                if target_square in piece_attacks:
-                    attackers.append(square)
+        # First, get direct attackers
+        direct_attackers = list(self.board.attackers(attacker_color, target_square))
+        attackers.extend(direct_attackers)
+
+        # Now find x-ray attackers: pieces that would attack if direct attackers were removed
+        # Only sliding pieces (bishops, rooks, queens) can create x-ray attacks
+        target_piece = self.board.piece_at(target_square)
+
+        # Temporarily remove target piece and all direct attackers to reveal x-ray attackers
+        removed_pieces = []
+        if target_piece:
+            self.board.remove_piece_at(target_square)
+            removed_pieces.append((target_square, target_piece))
+
+        for sq in direct_attackers:
+            piece = self.board.piece_at(sq)
+            if piece:
+                self.board.remove_piece_at(sq)
+                removed_pieces.append((sq, piece))
+
+        # Find new attackers that were previously blocked
+        xray_attackers = list(self.board.attackers(attacker_color, target_square))
+        attackers.extend(xray_attackers)
+
+        # Restore all removed pieces
+        for sq, piece in removed_pieces:
+            self.board.set_piece_at(sq, piece)
 
         return attackers
 

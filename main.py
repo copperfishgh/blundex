@@ -1,6 +1,8 @@
+import os
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+
 import pygame
 import sys
-import os
 import chess
 from chess_board import BoardState, square_from_coords, coords_from_square
 from display import ChessDisplay
@@ -14,7 +16,7 @@ try:
     DIALOG_AVAILABLE = True
 except ImportError:
     DIALOG_AVAILABLE = False
-    print("File dialog not available - PGN files will use default names")
+    # File dialog not available - PGN files will use default names
 
 # Set window behavior before pygame init (removed problematic positioning)
 

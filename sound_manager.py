@@ -29,9 +29,10 @@ class SoundManager:
                 channels=AudioConfig.CHANNELS,
                 buffer=AudioConfig.BUFFER
             )
-            print("Audio system initialized successfully")
+            # Audio system initialized successfully
         except pygame.error as e:
-            print(f"Failed to initialize audio system: {e}")
+            # Failed to initialize audio system
+            pass
 
     def _create_sounds(self) -> None:
         """Create all game sounds"""
@@ -73,10 +74,10 @@ class SoundManager:
             return pygame.sndarray.make_sound(stereo_arr)
 
         except ImportError:
-            print("NumPy not available for pygame sound generation")
+            # NumPy not available for pygame sound generation
             return None
         except Exception as e:
-            print(f"Could not create pygame sound: {e}")
+            # Could not create pygame sound
             return None
 
     def _play_system_beep(self) -> None:
@@ -85,9 +86,11 @@ class SoundManager:
             import winsound
             winsound.Beep(AudioConfig.BEEP_FREQUENCY, AudioConfig.BEEP_DURATION)
         except ImportError:
-            print("System beep not available on this platform")
+            # System beep not available on this platform
+            pass
         except Exception as e:
-            print(f"Failed to play system beep: {e}")
+            # Failed to play system beep
+            pass
 
     def play_error_sound(self) -> None:
         """Play error sound for invalid actions (undo/redo failures, etc.)"""
@@ -95,7 +98,7 @@ class SoundManager:
             try:
                 self.error_sound.play()
             except pygame.error as e:
-                print(f"Failed to play error sound: {e}")
+                # Failed to play error sound
                 self._play_system_beep()
         else:
             self._play_system_beep()
