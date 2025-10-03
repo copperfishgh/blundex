@@ -193,17 +193,26 @@ class ChessDisplay:
 
         # Draw statistics below checkboxes if board_state is provided
         if board_state:
-            self._draw_panel_statistics(screen, board_state, is_board_flipped, current_y + 20)
+            # Calculate vertical centering for statistics table
+            # 9 rows in the table, calculate total height needed
+            stats_row_height = self.font_small.get_height() + 4
+            total_table_height = 9 * stats_row_height
+
+            # Center the table in the remaining vertical space
+            remaining_vertical_space = self.board_size - (current_y - self.help_panel_y)
+            centered_start_y = current_y + (remaining_vertical_space - total_table_height) // 2
+
+            self._draw_panel_statistics(screen, board_state, is_board_flipped, centered_start_y)
 
     def _draw_panel_statistics(self, screen, board_state, is_board_flipped: bool, start_y: int) -> None:
         """Draw activity and pawn statistics in spreadsheet-style table format"""
         # Clear previous cell rectangles
         self.statistic_cell_rects = {}
 
-        # Table dimensions
-        table_width = self.help_panel_width - 20  # 10px margin on each side
-        table_x = self.help_panel_x + 10
-        row_height = self.font_small.get_height() + 6  # Extra padding for readability
+        # Table dimensions - reduced size
+        table_width = self.help_panel_width - 40  # Increased margin for smaller box
+        table_x = self.help_panel_x + 20
+        row_height = self.font_small.get_height() + 4  # Reduced padding for tighter rows
 
         # Column widths (proportional to table width)
         col1_width = int(table_width * 0.5)   # Statistic name (left)
@@ -250,15 +259,15 @@ class ChessDisplay:
 
         # Table data: (name, player_value, opponent_value, higher_is_better)
         table_data = [
-            ("Activity", player_activity, opponent_activity, True),
-            ("Development", player_development, opponent_development, True),
-            ("Attacked", player_attacked, opponent_attacked, False),  # Lower is better
             ("Hanging", player_hanging, opponent_hanging, False),  # Lower is better
-            ("Pawns", player_pawns, opponent_pawns, True),
+            ("Attacked", player_attacked, opponent_attacked, False),  # Lower is better
+            ("Developed", player_development, opponent_development, True),
+            ("Passed", player_passed, opponent_passed, True),         # Higher is better
             ("Backward", player_backward, opponent_backward, False),  # Lower is better
             ("Isolated", player_isolated, opponent_isolated, False),  # Lower is better
             ("Doubled", player_doubled, opponent_doubled, False),     # Lower is better
-            ("Passed", player_passed, opponent_passed, True)         # Higher is better
+            ("Pawns", player_pawns, opponent_pawns, True),
+            ("Activity", player_activity, opponent_activity, True)
         ]
 
         current_y = start_y
@@ -309,13 +318,21 @@ class ChessDisplay:
             screen.blit(name_surface, (name_x, name_y))
 
             # Column 2: Player value (center-aligned)
-            player_surface = self.font_small.render(str(player_val), True, Colors.RGB_BLACK)
+            # Use red bold font if this is Hanging row and value > 0
+            if row_name == "Hanging" and player_val > 0:
+                player_surface = self.font_medium_bold.render(str(player_val), True, (255, 0, 0))
+            else:
+                player_surface = self.font_small.render(str(player_val), True, Colors.RGB_BLACK)
             player_x = table_x + col1_width + (col2_width - player_surface.get_width()) // 2
             player_y = current_y + (row_height - player_surface.get_height()) // 2
             screen.blit(player_surface, (player_x, player_y))
 
             # Column 3: Opponent value (center-aligned)
-            opponent_surface = self.font_small.render(str(opponent_val), True, Colors.RGB_BLACK)
+            # Use red bold font if this is Hanging row and value > 0
+            if row_name == "Hanging" and opponent_val > 0:
+                opponent_surface = self.font_medium_bold.render(str(opponent_val), True, (255, 0, 0))
+            else:
+                opponent_surface = self.font_small.render(str(opponent_val), True, Colors.RGB_BLACK)
             opponent_x = table_x + col1_width + col2_width + (col3_width - opponent_surface.get_width()) // 2
             opponent_y = current_y + (row_height - opponent_surface.get_height()) // 2
             screen.blit(opponent_surface, (opponent_x, opponent_y))
