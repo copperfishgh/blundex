@@ -87,22 +87,6 @@ class Colors:
     # Piece placeholder colors
     PIECE_BORDER = (100, 100, 100)          # Grey border for piece placeholders
 
-class AudioConfig:
-    """Audio system configuration"""
-
-    # Pygame mixer settings
-    FREQUENCY = 22050
-    SIZE = -16
-    CHANNELS = 2
-    BUFFER = 512
-
-    # Error beep settings
-    BEEP_FREQUENCY = 800   # 800Hz beep
-    BEEP_DURATION = 300    # 300ms duration
-
-    # Animation settings
-    FADE_DURATION = 0.01   # 10ms fade in/out
-
 class AnimationConfig:
     """Animation timing and settings"""
 

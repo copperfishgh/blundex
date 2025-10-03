@@ -7,7 +7,6 @@ import chess
 from chess_board import BoardState, square_from_coords, coords_from_square
 from display import ChessDisplay
 from config import GameConfig, Colors
-from sound_manager import get_sound_manager
 
 # Try to import file dialog functionality
 try:
@@ -38,8 +37,15 @@ screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
 pygame.display.set_caption("Blundex")
 
 
-# Initialize sound system
-sound_manager = get_sound_manager()
+# Simple error beep function
+def play_error_beep():
+    """Play a simple error beep sound"""
+    try:
+        import winsound
+        winsound.Beep(800, 200)  # 800Hz for 200ms
+    except (ImportError, RuntimeError):
+        # winsound not available (non-Windows) or failed - fail silently
+        pass
 
 # Create global board state in starting position
 game = BoardState()
@@ -135,9 +141,9 @@ while is_running:
                         highlighted_moves = []
                         needs_redraw = True
                     else:
-                        sound_manager.play_error_sound()
+                        play_error_beep()
                 else:
-                    sound_manager.play_error_sound()
+                    play_error_beep()
             elif event.key == pygame.K_r:  # R key to redo
                 if game.can_redo():
                     success = game.redo_move()
@@ -147,9 +153,9 @@ while is_running:
                         highlighted_moves = []
                         needs_redraw = True
                     else:
-                        sound_manager.play_error_sound()
+                        play_error_beep()
                 else:
-                    sound_manager.play_error_sound()
+                    play_error_beep()
             elif event.key == pygame.K_h:  # H key to toggle hanging pieces
                 display.toggle_help_option("hanging_pieces")
                 needs_redraw = True
@@ -186,10 +192,10 @@ while is_running:
                         needs_redraw = True
                         print(f"Loaded PGN file: {filename}")
                     else:
-                        sound_manager.play_error_sound()
+                        play_error_beep()
                         print(f"Failed to load PGN file: {filename}")
                 else:
-                    sound_manager.play_error_sound()
+                    play_error_beep()
             elif event.key == pygame.K_s and pygame.key.get_pressed()[pygame.K_LCTRL]:  # Ctrl+S to save PGN
                 filename = get_save_filename()
                 if filename:
@@ -197,10 +203,10 @@ while is_running:
                     if success:
                         print(f"Saved PGN file: {filename}")
                     else:
-                        sound_manager.play_error_sound()
+                        play_error_beep()
                         print(f"Failed to save PGN file: {filename}")
                 else:
-                    sound_manager.play_error_sound()
+                    play_error_beep()
         elif event.type == pygame.MOUSEBUTTONDOWN:
             mouse_pos = pygame.mouse.get_pos()
             
@@ -254,12 +260,12 @@ while is_running:
                                         from_square, to_square, promotion_piece
                                     )
                                     if not move_successful:
-                                        sound_manager.play_error_sound()
+                                        play_error_beep()
                                 else:
                                     # Execute regular move
                                     move_successful = game.make_move(from_square, to_square)
                                     if not move_successful:
-                                        sound_manager.play_error_sound()
+                                        play_error_beep()
 
                                 # Clear selection regardless
                                 selected_square_coords = None
