@@ -904,37 +904,12 @@ class ChessDisplay:
 
             print(f"Drawing {len(all_forks)} forks")
 
-            # Collect all squares involved in forks
-            fork_origins = set()
-            fork_destinations = set()
-            fork_targets = set()
-
+            # Draw arrows for each fork
             for fork in all_forks:
                 origin_coords = coords_from_square(fork['origin'])
                 dest_coords = coords_from_square(fork['destination'])
-                fork_origins.add(origin_coords)
-                fork_destinations.add(dest_coords)
-                print(f"  Origin: {origin_coords}, Dest: {dest_coords}")
-                for target_square in fork['forked_pieces']:
-                    target_coords = coords_from_square(target_square)
-                    fork_targets.add(target_coords)
-                    print(f"    Target: {target_coords}")
-
-            # Draw fork indicators on top of everything
-            for row in range(8):
-                for col in range(8):
-                    display_pos = self.get_square_display_position(row, col, is_board_flipped)
-                    if display_pos:
-                        x, y = display_pos
-
-                        # Draw indicators in order: targets, destinations, origins
-                        # (so origins appear on top if overlapping)
-                        if (row, col) in fork_targets:
-                            self.draw_fork_target_indicator(screen, x, y)
-                        if (row, col) in fork_destinations:
-                            self.draw_fork_destination_indicator(screen, x, y)
-                        if (row, col) in fork_origins:
-                            self.draw_fork_origin_indicator(screen, x, y)
+                print(f"  Arrow: {origin_coords} -> {dest_coords}")
+                self.draw_fork_arrow(screen, origin_coords, dest_coords, is_board_flipped)
 
             draw_end_time = timing_module.perf_counter()
             draw_elapsed = (draw_end_time - draw_start_time) * 1000
@@ -1405,17 +1380,74 @@ class ChessDisplay:
         text_rect = text.get_rect(center=(circle_center_x, circle_center_y))
         screen.blit(text, text_rect)
 
-    def draw_fork_origin_indicator(self, screen, x: int, y: int) -> None:
-        """Draw a light blue outline for fork origin square"""
-        pygame.draw.rect(screen, Colors.FORK_ORIGIN, (x, y, self.square_size, self.square_size), 8)
+    def draw_fork_arrow(self, screen, from_coords: Tuple[int, int], to_coords: Tuple[int, int], is_board_flipped: bool) -> None:
+        """Draw an arrow from origin square to fork destination square"""
+        # Get display positions for both squares
+        from_pos = self.get_square_display_position(from_coords[0], from_coords[1], is_board_flipped)
+        to_pos = self.get_square_display_position(to_coords[0], to_coords[1], is_board_flipped)
 
-    def draw_fork_destination_indicator(self, screen, x: int, y: int) -> None:
-        """Draw a medium blue outline for fork destination square"""
-        pygame.draw.rect(screen, Colors.FORK_DESTINATION, (x, y, self.square_size, self.square_size), 8)
+        if not from_pos or not to_pos:
+            return
 
-    def draw_fork_target_indicator(self, screen, x: int, y: int) -> None:
-        """Draw a pure blue outline for forked piece square"""
-        pygame.draw.rect(screen, Colors.FORK_TARGET, (x, y, self.square_size, self.square_size), 8)
+        # Calculate center points of each square
+        from_x, from_y = from_pos
+        to_x, to_y = to_pos
+        from_center = (from_x + self.square_size // 2, from_y + self.square_size // 2)
+        to_center = (to_x + self.square_size // 2, to_y + self.square_size // 2)
+
+        # Create a transparent surface for the arrow
+        import math
+
+        # Calculate bounding box for the arrow
+        min_x = min(from_center[0], to_center[0]) - 50
+        min_y = min(from_center[1], to_center[1]) - 50
+        max_x = max(from_center[0], to_center[0]) + 50
+        max_y = max(from_center[1], to_center[1]) + 50
+
+        width = max_x - min_x
+        height = max_y - min_y
+
+        # Create transparent surface
+        arrow_surface = pygame.Surface((width, height), pygame.SRCALPHA)
+
+        # Adjust coordinates relative to the surface
+        from_relative = (from_center[0] - min_x, from_center[1] - min_y)
+        to_relative = (to_center[0] - min_x, to_center[1] - min_y)
+
+        # Semi-transparent gray color (R, G, B, Alpha)
+        arrow_color = (128, 128, 128, 180)  # Gray with 70% opacity
+        line_width = 12  # Doubled from 6
+
+        # Draw arrow line on transparent surface
+        pygame.draw.line(arrow_surface, arrow_color, from_relative, to_relative, line_width)
+
+        # Draw arrowhead at destination
+        arrow_length = 40  # Doubled from 20
+        arrow_angle = 25  # degrees
+
+        # Calculate angle of the line
+        dx = to_relative[0] - from_relative[0]
+        dy = to_relative[1] - from_relative[1]
+        angle = math.atan2(dy, dx)
+
+        # Calculate arrowhead points
+        angle1 = angle + math.radians(180 - arrow_angle)
+        angle2 = angle + math.radians(180 + arrow_angle)
+
+        point1 = (
+            to_relative[0] + arrow_length * math.cos(angle1),
+            to_relative[1] + arrow_length * math.sin(angle1)
+        )
+        point2 = (
+            to_relative[0] + arrow_length * math.cos(angle2),
+            to_relative[1] + arrow_length * math.sin(angle2)
+        )
+
+        # Draw filled triangle for arrowhead on transparent surface
+        pygame.draw.polygon(arrow_surface, arrow_color, [to_relative, point1, point2])
+
+        # Blit the transparent surface onto the screen
+        screen.blit(arrow_surface, (min_x, min_y))
 
     def draw_gray_overlay(self, screen, x: int, y: int) -> None:
         """Draw a semi-transparent gray overlay to dim non-highlighted squares"""

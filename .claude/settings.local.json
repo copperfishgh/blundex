@@ -10,7 +10,11 @@
       "Bash(git checkout:*)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:python-chess.readthedocs.io)",
-      "WebSearch"
+      "WebSearch",
+      "WebFetch(domain:claude.ai)",
+      "Bash(cat:*)",
+      "Bash(git restore:*)",
+      "Read(//c/Users/rickf/Desktop/blundex/capablanca/**)"
     ],
     "deny": [],
     "ask": []
