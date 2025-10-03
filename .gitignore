@@ -34,3 +34,8 @@ Thumbs.db
 # Project specific
 .blundex
 *.pgn
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec.bak
