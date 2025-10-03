@@ -16,6 +16,9 @@ import chess
 from chess_board import BoardState, square_from_coords, coords_from_square
 from config import GameConfig, Colors, AnimationConfig, GameConstants
 
+# Timing debug
+import time as timing_module
+
 # Get the correct path for bundled resources (PyInstaller compatibility)
 def get_resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
@@ -795,7 +798,7 @@ class ChessDisplay:
     def draw_board(self, screen, board_state: BoardState, selected_square_coords: Optional[Tuple[int, int]] = None,
                    highlighted_moves: List[Tuple[int, int]] = None, is_board_flipped: bool = False,
                    preview_board_state: Optional[BoardState] = None, dragging_piece=None, drag_origin=None,
-                   mouse_pos: Optional[Tuple[int, int]] = None) -> None:
+                   mouse_pos: Optional[Tuple[int, int]] = None, show_forks: bool = False) -> None:
         """Draw the chess board with pieces"""
         if highlighted_moves is None:
             highlighted_moves = []
@@ -887,6 +890,55 @@ class ChessDisplay:
                     self.draw_move_indicator(screen, x, y)
 
                 # Exchange evaluation triangles removed
+
+        # Draw fork indicators if enabled
+        if show_forks:
+            draw_start_time = timing_module.perf_counter()
+
+            evaluation_board = preview_board_state if preview_board_state else board_state
+
+            # Get fork opportunities for both colors
+            white_forks = evaluation_board.get_fork_opportunities(chess.WHITE)
+            black_forks = evaluation_board.get_fork_opportunities(chess.BLACK)
+            all_forks = white_forks + black_forks
+
+            print(f"Drawing {len(all_forks)} forks")
+
+            # Collect all squares involved in forks
+            fork_origins = set()
+            fork_destinations = set()
+            fork_targets = set()
+
+            for fork in all_forks:
+                origin_coords = coords_from_square(fork['origin'])
+                dest_coords = coords_from_square(fork['destination'])
+                fork_origins.add(origin_coords)
+                fork_destinations.add(dest_coords)
+                print(f"  Origin: {origin_coords}, Dest: {dest_coords}")
+                for target_square in fork['forked_pieces']:
+                    target_coords = coords_from_square(target_square)
+                    fork_targets.add(target_coords)
+                    print(f"    Target: {target_coords}")
+
+            # Draw fork indicators on top of everything
+            for row in range(8):
+                for col in range(8):
+                    display_pos = self.get_square_display_position(row, col, is_board_flipped)
+                    if display_pos:
+                        x, y = display_pos
+
+                        # Draw indicators in order: targets, destinations, origins
+                        # (so origins appear on top if overlapping)
+                        if (row, col) in fork_targets:
+                            self.draw_fork_target_indicator(screen, x, y)
+                        if (row, col) in fork_destinations:
+                            self.draw_fork_destination_indicator(screen, x, y)
+                        if (row, col) in fork_origins:
+                            self.draw_fork_origin_indicator(screen, x, y)
+
+            draw_end_time = timing_module.perf_counter()
+            draw_elapsed = (draw_end_time - draw_start_time) * 1000
+            print(f"Fork drawing took {draw_elapsed:.2f}ms")
 
         # Draw exchange evaluation piece highlights (gray out non-highlighted) if hovering
         # Only run if NOT hovering over statistics (to avoid conflict)
@@ -1353,6 +1405,18 @@ class ChessDisplay:
         text_rect = text.get_rect(center=(circle_center_x, circle_center_y))
         screen.blit(text, text_rect)
 
+    def draw_fork_origin_indicator(self, screen, x: int, y: int) -> None:
+        """Draw a light blue outline for fork origin square"""
+        pygame.draw.rect(screen, Colors.FORK_ORIGIN, (x, y, self.square_size, self.square_size), 8)
+
+    def draw_fork_destination_indicator(self, screen, x: int, y: int) -> None:
+        """Draw a medium blue outline for fork destination square"""
+        pygame.draw.rect(screen, Colors.FORK_DESTINATION, (x, y, self.square_size, self.square_size), 8)
+
+    def draw_fork_target_indicator(self, screen, x: int, y: int) -> None:
+        """Draw a pure blue outline for forked piece square"""
+        pygame.draw.rect(screen, Colors.FORK_TARGET, (x, y, self.square_size, self.square_size), 8)
+
     def draw_gray_overlay(self, screen, x: int, y: int) -> None:
         """Draw a semi-transparent gray overlay to dim non-highlighted squares"""
         overlay = pygame.Surface((self.square_size, self.square_size), pygame.SRCALPHA)
@@ -1435,7 +1499,7 @@ class ChessDisplay:
     def update_display(self, screen, board_state: BoardState, selected_square_coords: Optional[Tuple[int, int]] = None,
                       highlighted_moves: List[Tuple[int, int]] = None, is_board_flipped: bool = False,
                       preview_board_state: Optional[BoardState] = None, dragging_piece=None, drag_origin=None,
-                      mouse_pos: Optional[Tuple[int, int]] = None) -> None:
+                      mouse_pos: Optional[Tuple[int, int]] = None, show_forks: bool = False) -> None:
         """Update the entire display"""
         # Check for checkmate and start animation if needed
         if board_state.is_in_checkmate and self.checkmate_animation_start_time is None:
@@ -1449,7 +1513,7 @@ class ChessDisplay:
         screen.fill(self.RGB_WHITE)
 
         # Draw all components
-        self.draw_board(screen, board_state, selected_square_coords, highlighted_moves, is_board_flipped, preview_board_state, dragging_piece, drag_origin, mouse_pos)
+        self.draw_board(screen, board_state, selected_square_coords, highlighted_moves, is_board_flipped, preview_board_state, dragging_piece, drag_origin, mouse_pos, show_forks)
 
         # Draw help panel with statistics (uses preview_board_state when dragging to legal square)
         stats_board_state = preview_board_state if preview_board_state else board_state

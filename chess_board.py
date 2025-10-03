@@ -14,6 +14,7 @@ Uses python-chess types directly:
 from typing import Optional, List, Tuple
 import copy
 import io
+import time
 import chess
 import chess.pgn
 from config import GameConstants
@@ -93,6 +94,10 @@ class BoardState:
             # Skewered pieces (used by: get_skewered_pieces, skewer indicator)
             'white_skewered': [],
             'black_skewered': [],
+            # Fork opportunities (used by: get_fork_opportunities, fork visualization)
+            # Format: list of dicts with {origin: square, destination: square, forked_pieces: [squares]}
+            'white_forks': [],
+            'black_forks': [],
             # Pawn patterns (used by: pawn statistics display)
             'white_isolated': [],
             'black_isolated': [],
@@ -392,6 +397,125 @@ class BoardState:
             if not can_be_defended and not can_safely_advance:
                 analysis['black_backward'].append(square)
 
+        # --- FORK DETECTION ---
+        # Detect all possible forks for both colors
+        fork_start_time = time.perf_counter()
+        for color in [chess.WHITE, chess.BLACK]:
+            color_pieces = white_pieces if color == chess.WHITE else black_pieces
+            enemy_color = not color
+
+            # For each piece of this color
+            for origin_square in color_pieces:
+                piece = self.board.piece_at(origin_square)
+
+                # Get all pseudo-legal moves for this piece (don't check if it's this color's turn)
+                # We use attacks_mask to get all squares this piece can move to
+                piece_type = piece.piece_type
+
+                # Generate candidate destination squares based on piece type
+                if piece_type == chess.PAWN:
+                    # Pawn moves: one square forward, two squares forward (if on starting rank), diagonal captures
+                    rank = chess.square_rank(origin_square)
+                    file = chess.square_file(origin_square)
+                    candidate_squares = []
+
+                    # Forward moves
+                    if color == chess.WHITE:
+                        if rank < 7:
+                            forward_one = chess.square(file, rank + 1)
+                            if not self.board.piece_at(forward_one):
+                                candidate_squares.append(forward_one)
+                                if rank == 1:  # Starting rank
+                                    forward_two = chess.square(file, rank + 2)
+                                    if not self.board.piece_at(forward_two):
+                                        candidate_squares.append(forward_two)
+                        # Diagonal captures
+                        if rank < 7 and file > 0:
+                            candidate_squares.append(chess.square(file - 1, rank + 1))
+                        if rank < 7 and file < 7:
+                            candidate_squares.append(chess.square(file + 1, rank + 1))
+                    else:  # BLACK
+                        if rank > 0:
+                            forward_one = chess.square(file, rank - 1)
+                            if not self.board.piece_at(forward_one):
+                                candidate_squares.append(forward_one)
+                                if rank == 6:  # Starting rank
+                                    forward_two = chess.square(file, rank - 2)
+                                    if not self.board.piece_at(forward_two):
+                                        candidate_squares.append(forward_two)
+                        # Diagonal captures
+                        if rank > 0 and file > 0:
+                            candidate_squares.append(chess.square(file - 1, rank - 1))
+                        if rank > 0 and file < 7:
+                            candidate_squares.append(chess.square(file + 1, rank - 1))
+                else:
+                    # For non-pawns, use the attacks method to get all possible destination squares
+                    candidate_squares = list(self.board.attacks(origin_square))
+
+                # For each candidate destination square
+                for destination_square in candidate_squares:
+                    # Skip if destination has our own piece
+                    destination_piece = self.board.piece_at(destination_square)
+                    if destination_piece and destination_piece.color == color:
+                        continue
+
+                    # Temporarily make the move
+                    captured_piece = self.board.piece_at(destination_square)
+                    self.board.set_piece_at(destination_square, piece)
+                    self.board.remove_piece_at(origin_square)
+
+                    # Skip if destination square is defended by enemy (check AFTER moving)
+                    if self.board.is_attacked_by(enemy_color, destination_square):
+                        # Debug: show what was filtered
+                        piece_name = chess.piece_name(piece.piece_type)
+                        print(f"Filtered {piece_name}: {chess.square_name(origin_square)} -> {chess.square_name(destination_square)} (defended)")
+                        # Undo the temporary move
+                        self.board.set_piece_at(origin_square, piece)
+                        if captured_piece:
+                            self.board.set_piece_at(destination_square, captured_piece)
+                        else:
+                            self.board.remove_piece_at(destination_square)
+                        continue
+
+                    # Get all squares this piece attacks from the new position
+                    attacked_squares = self.board.attacks(destination_square)
+
+                    # Find enemy pieces (non-pawns) being attacked
+                    forked_pieces = []
+                    for attacked_sq in attacked_squares:
+                        attacked_piece = self.board.piece_at(attacked_sq)
+                        if (attacked_piece and
+                            attacked_piece.color == enemy_color and
+                            attacked_piece.piece_type != chess.PAWN):
+                            forked_pieces.append(attacked_sq)
+
+                    # Undo the temporary move
+                    self.board.set_piece_at(origin_square, piece)
+                    if captured_piece:
+                        self.board.set_piece_at(destination_square, captured_piece)
+                    else:
+                        self.board.remove_piece_at(destination_square)
+
+                    # If 2+ non-pawn pieces are attacked, it's a fork!
+                    if len(forked_pieces) >= 2:
+                        fork_data = {
+                            'origin': origin_square,
+                            'destination': destination_square,
+                            'forked_pieces': forked_pieces
+                        }
+                        color_name = "White" if color == chess.WHITE else "Black"
+                        piece_name = chess.piece_name(piece.piece_type)
+                        targets = [chess.square_name(sq) for sq in forked_pieces]
+                        print(f"Found {color_name} {piece_name} fork: {chess.square_name(origin_square)} -> {chess.square_name(destination_square)} attacks {targets}")
+                        if color == chess.WHITE:
+                            analysis['white_forks'].append(fork_data)
+                        else:
+                            analysis['black_forks'].append(fork_data)
+
+        fork_end_time = time.perf_counter()
+        fork_elapsed = (fork_end_time - fork_start_time) * 1000  # Convert to milliseconds
+        print(f"Fork detection took {fork_elapsed:.2f}ms")
+
         return analysis
 
     def reset_to_initial_position(self) -> None:
@@ -660,6 +784,13 @@ class BoardState:
         """Get list of skewered pieces for the given color"""
         self._ensure_analysis()
         return self._analysis['white_skewered' if color == chess.WHITE else 'black_skewered']
+
+    def get_fork_opportunities(self, color: bool) -> List[dict]:
+        """Get list of fork opportunities for the given color
+        Returns list of dicts: {origin: square, destination: square, forked_pieces: [squares]}
+        """
+        self._ensure_analysis()
+        return self._analysis['white_forks' if color == chess.WHITE else 'black_forks']
 
     def count_pawns(self, color: bool) -> int:
         """Count the number of pawns for a given color"""

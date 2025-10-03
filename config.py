@@ -87,6 +87,11 @@ class Colors:
     # Piece placeholder colors
     PIECE_BORDER = (100, 100, 100)          # Grey border for piece placeholders
 
+    # Fork visualization colors
+    FORK_ORIGIN = (0, 255, 255)             # Cyan for fork origin (very bright)
+    FORK_DESTINATION = (0, 128, 255)        # Bright blue for fork destination
+    FORK_TARGET = (255, 0, 255)             # Magenta for forked pieces (very visible)
+
 class AnimationConfig:
     """Animation timing and settings"""
 
