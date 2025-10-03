@@ -9,11 +9,24 @@ from typing import Optional, Tuple, List
 import pygame
 import json
 import os
+import sys
 import math
 import time
 import chess
 from chess_board import BoardState, square_from_coords, coords_from_square
 from config import GameConfig, Colors, AnimationConfig, GameConstants
+
+# Get the correct path for bundled resources (PyInstaller compatibility)
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # Running in normal Python environment
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 class ChessDisplay:
     """Handles the visual display of the chess game"""
@@ -131,7 +144,8 @@ class ChessDisplay:
                 # Create filename based on naming convention: {color}{piece}.png
                 color_prefix = "w" if color == chess.WHITE else "b"
                 piece_symbol = piece_symbols[piece_type]
-                filename = f"pngs/2x/{color_prefix}{piece_symbol}.png"
+                relative_filename = f"pngs/2x/{color_prefix}{piece_symbol}.png"
+                filename = get_resource_path(relative_filename)
 
                 try:
                     # Load the original image
