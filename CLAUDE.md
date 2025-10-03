@@ -25,12 +25,17 @@ python main.py    # Run the application
 - Full chess rules implementation including castling, en passant, pawn promotion
 - Legal move generation with check validation
 - Undo/redo system with 50-move history limit
+- Bitboard-optimized mega-loop for tactical analysis (pins, skewers, pawn patterns)
+- X-ray attack detection for comprehensive attacker/defender analysis
 - Caching system for hanging pieces and exchange evaluation
-- FEN notation support for position representation
+- FEN and PGN support for position representation and game import/export
 
 **display.py** - Visual rendering and user interface
 - `ChessDisplay` class: All graphical output and UI components
 - Board rendering with coordinate system and piece positioning
+- Pin and skewer indicators (white circles with P/S letters)
+- Statistics display panel with organized tactical metrics
+- Performance monitoring display (hover computation timing)
 - Helper panel with configurable tactical assistance options
 - Drag-and-drop visual feedback and move preview system
 - Animation system for checkmate/stalemate effects
@@ -70,17 +75,24 @@ The `pngs/2x/` directory contains chess piece images in the format `{color}{piec
 
 ### Development Notes
 
-- No build system or dependency management files (requirements.txt, etc.)
+- Dependencies managed via requirements.txt (Pygame + python-chess)
 - Direct Python execution with standard library + Pygame
 - Cross-platform Windows/Linux/macOS compatibility
 - Memory-efficient with move history limits and caching systems
 - Optimized rendering with smart redraw detection
+- Performance monitoring for tactical computation optimization
 
 ### Important Implementation Details
 
+**Tactical Analysis**: Bitboard-optimized mega-loop in `_compute_board_analysis()` detects pins, skewers, and pawn patterns
+**X-ray Detection**: `_get_attackers()` temporarily removes pieces to reveal attacks through blocking pieces
+**Pin Detection**: Custom implementation detects both absolute pins (to king) and relative pins (to valuable pieces)
+**Skewer Detection**: Identifies high-value pieces with lower-value pieces behind (excludes pawns as targets)
 **Caching Systems**: `BoardState._update_hanging_pieces_cache()` and `_update_exchange_cache()` for performance
+**PGN Support**: Uses python-chess library for game import/export functionality
 **Coordinate Systems**: Display coordinates vs board coordinates, with flipping logic in `display.py`
 **Event Handling**: Main game loop in `main.py` handles all input with smart redraw detection
 **State Management**: Comprehensive undo/redo system with deep copying in `chess_board.py`
+**Performance Tracking**: `display.py` monitors hover computation time with rolling average display
 
 For user features and application overview, see [README.md](README.md).

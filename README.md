@@ -36,6 +36,11 @@ Chess has two main components: **tactical accuracy** (not hanging pieces) and **
 - Checkmate/stalemate detection with visual effects
 
 **Latest Features:**
+- Pin and skewer detection with visual indicators (white circles with P/S letters)
+- X-ray attack detection for comprehensive tactical analysis
+- PGN file support (load and save games)
+- Performance monitoring display (hover computation metrics)
+- Statistics panel with red bold highlighting for hanging pieces
 - Material-weighted hanging pieces system with value-based visual indicators
 - Exchange evaluation system with hover-based tactical analysis
 - Move preview system showing tactical consequences before committing
@@ -44,7 +49,7 @@ Chess has two main components: **tactical accuracy** (not hanging pieces) and **
 - Persistent settings system for user preferences
 
 **Still Needed for Full Blundex Vision:**
-- Additional tactical helpers (forks, pins, skewers)
+- Additional tactical helpers (forks, discovered attacks)
 - Strategic helper system (text analysis under board)
 - Real-time position analysis engine
 
@@ -62,6 +67,8 @@ python main.py
 - **R** - Redo move
 - **H** - Toggle hanging pieces helper
 - **E** - Toggle exchange evaluation helper
+- **Ctrl+O** - Open PGN file
+- **Ctrl+S** - Save game to PGN file
 - **~** - Reset game to starting position
 - **/** - Show/hide keyboard shortcuts help panel
 - **ESC** - Exit game (or close help panel if open)
@@ -69,9 +76,14 @@ python main.py
 **Visual Features:**
 - **Drag-and-Drop Movement** - Smooth piece dragging with automatic square snapping
 - **Last Move Highlighting** - Green overlay on from/to squares (lichess-style)
+- **Pin Indicators** - White circles with 'P' mark pinned pieces (absolute and relative pins)
+- **Skewer Indicators** - White circles with 'S' mark skewered pieces
 - **Consistent Visual Indicators** - Clear 4px borders for all hanging pieces
 - **Exchange Analysis** - Yellow triangles mark capturable pieces, orange highlights show attackers/defenders
+- **X-ray Attacks** - Hover detection includes attacks through pieces (queen behind rook, etc.)
 - **Move Preview** - Real-time tactical analysis when dragging over legal moves
+- **Statistics Display** - Organized panel showing hanging, attacked, developed pieces, pawn stats, and activity
+- **Performance Metrics** - Top-left corner shows hover computation time (rolling 30-sample average)
 - **Dynamic Help Panel** - Press / for pixel-perfect auto-sized keyboard shortcuts overlay
 - **Performance Optimized** - Annotations only compute when entering different legal squares
 - **Persistent Settings** - Helper preferences saved between sessions
@@ -131,9 +143,14 @@ Blundex separates chess analysis into two distinct helper categories with **gran
 - High-performance caching system prevents lag during mouse movement
 - Integrated with hanging pieces system for complete tactical awareness
 
+**Implemented Tactical Helpers:**
+- **Pins** - Detects both absolute pins (to king) and relative pins (to valuable pieces)
+- **Skewers** - Identifies high-value pieces attacked with lower-value pieces behind (excludes pawns)
+- **X-ray Attacks** - Shows all attackers including those behind other pieces on the same line
+
 **Future Tactical Helpers:**
 - **Immediate Threats** - Warning symbols for mate in 1, checks
-- **Simple Tactics** - Highlight forks, pins, skewers (1-2 move depth)
+- **Simple Tactics** - Highlight forks and discovered attacks
 - **Material Wins** - Show squares where you can capture for free
 - **Blunder Prevention** - Block moves that hang material
 
